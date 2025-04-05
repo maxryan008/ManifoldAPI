@@ -1,0 +1,14 @@
+{
+	"required": true,
+	"package": "dev.manifold.mixin",
+	"compatibilityLevel": "JAVA_21",
+	"client": [
+		"accessor.SectionCompilerAccessor",
+		"accessor.SectionRenderDispatcher_CompiledSectionAccessor",
+		"accessor.SectionRenderDispatcher_RenderSectionAccessor",
+		"accessor.SectionRenderDispatcherAccessor"
+	],
+	"injectors": {
+		"defaultRequire": 1
+	}
+}

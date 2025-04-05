@@ -1,0 +1,264 @@
+package dev.manifold;
+
+import dev.manifold.network.ConstructSectionDataS2CPacket;
+import io.netty.buffer.Unpooled;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.SectionPos;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.util.Mth;
+import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.chunk.LevelChunk;
+import net.minecraft.world.level.chunk.LevelChunkSection;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec3;
+import org.jetbrains.annotations.Nullable;
+import org.joml.Matrix4f;
+import org.joml.Quaternionf;
+import org.joml.Vector2i;
+
+import java.util.*;
+
+public class ConstructManager {
+    public static ConstructManager INSTANCE;
+
+    private static final BlockPos REGION_CENTER = new BlockPos(256, 256, 256);
+    private static final int REGION_SIZE = 512;
+
+    private final ServerLevel simDimension;
+    private final Map<UUID, DynamicConstruct> constructs = new HashMap<>();
+    private final Map<Vector2i, UUID> regionOwners = new HashMap<>();
+
+    public ConstructManager(ServerLevel simDimension) {
+        this.simDimension = simDimension;
+    }
+
+    public void loadFromSave(ConstructSaveData saveData) {
+        for (DynamicConstruct construct : saveData.getConstructs().values()) {
+            constructs.put(construct.getId(), construct);
+            regionOwners.put(getRegionIndex(construct.getSimOrigin()), construct.getId());
+        }
+    }
+
+    public ConstructSaveData toSaveData() {
+        return new ConstructSaveData(constructs);
+    }
+
+    public UUID createConstruct(BlockState state) {
+        Vector2i region = findFreeRegion();
+        BlockPos center = regionCenterToWorld(region);
+        UUID uuid = UUID.randomUUID();
+
+        DynamicConstruct construct = new DynamicConstruct(uuid, simDimension.dimension(), center);
+        simDimension.setBlock(center, state, 3);
+
+        constructs.put(uuid, construct);
+        regionOwners.put(region, uuid);
+        return uuid;
+    }
+
+    public void removeConstruct(UUID id) {
+        DynamicConstruct construct = constructs.remove(id);
+        if (construct != null) {
+            clearConstructArea(construct);
+            regionOwners.remove(getRegionIndex(construct.getSimOrigin()));
+        }
+    }
+
+    public void setPosition(UUID id, Vec3 position) {
+        Optional.ofNullable(constructs.get(id)).ifPresent(c -> c.setPosition(position));
+    }
+
+    public void setVelocity(UUID id, Vec3 velocity) {
+        Optional.ofNullable(constructs.get(id)).ifPresent(c -> c.setVelocity(velocity));
+    }
+
+    public void addVelocity(UUID id, Vec3 delta) {
+        Optional.ofNullable(constructs.get(id)).ifPresent(c -> c.addVelocity(delta));
+    }
+
+    public void setRotation(UUID id, Quaternionf rotation) {
+        Optional.ofNullable(constructs.get(id)).ifPresent(c -> c.setRotation(rotation));
+    }
+
+    public void addRotationalVelocity(UUID id, Quaternionf delta) {
+        Optional.ofNullable(constructs.get(id)).ifPresent(c -> c.addAngularVelocity(delta));
+    }
+
+    private void clearConstructArea(DynamicConstruct construct) {
+        AABB box = construct.getBoundingBox();
+        BlockPos min = new BlockPos((int) box.minX, (int) box.minY, (int) box.minZ);
+        BlockPos max = new BlockPos((int) box.maxX, (int) box.maxY, (int) box.maxZ);
+        for (BlockPos pos : BlockPos.betweenClosed(min, max)) {
+            simDimension.setBlock(pos, Blocks.AIR.defaultBlockState(), 3);
+        }
+    }
+
+    private Vector2i findFreeRegion() {
+        for (int x = 0; x < 2048; x++) {
+            for (int z = 0; z < 2048; z++) {
+                Vector2i key = new Vector2i(x, z);
+                if (!regionOwners.containsKey(key)) return key;
+            }
+        }
+        throw new IllegalStateException("No free region available for construct.");
+    }
+
+    private BlockPos regionCenterToWorld(Vector2i region) {
+        return new BlockPos(
+                region.x * REGION_SIZE + REGION_CENTER.getX(),
+                REGION_CENTER.getY(),
+                region.y * REGION_SIZE + REGION_CENTER.getZ()
+        );
+    }
+
+    private Vector2i getRegionIndex(BlockPos pos) {
+        return new Vector2i(pos.getX() / REGION_SIZE, pos.getZ() / REGION_SIZE);
+    }
+
+    public Map<UUID, DynamicConstruct> getConstructs() {
+        return constructs;
+    }
+
+    public void placeBlockInConstruct(UUID id, BlockPos rel, BlockState state) {
+        DynamicConstruct construct = constructs.get(id);
+        if (construct == null) return;
+        BlockPos absolute = construct.getSimOrigin().offset(rel);
+        simDimension.setBlock(absolute, state, 3);
+    }
+
+    public void expandBounds(UUID id, BlockPos rel) {
+        DynamicConstruct construct = constructs.get(id);
+        if (construct == null) return;
+        System.out.println("Expanding construct with relative pos " + rel);
+
+        BlockPos neg = construct.getNegativeBounds();
+        BlockPos pos = construct.getPositiveBounds();
+
+        System.out.println("Negative Bounds " + neg);
+        System.out.println("Positive Bounds " + pos);
+
+        int newNegX = Math.min(neg.getX(), rel.getX());
+        int newNegY = Math.min(neg.getY(), rel.getY());
+        int newNegZ = Math.min(neg.getZ(), rel.getZ());
+
+        int newPosX = Math.max(pos.getX(), rel.getX());
+        int newPosY = Math.max(pos.getY(), rel.getY());
+        int newPosZ = Math.max(pos.getZ(), rel.getZ());
+
+        System.out.println("New Negative Bounds " + new BlockPos(newNegX, newNegY, newNegZ));
+        System.out.println("New Positive Bounds " + new BlockPos(newPosX, newPosY, newPosZ));
+
+        construct.setNegativeBounds(new BlockPos(newNegX, newNegY, newNegZ));
+        construct.setPositiveBounds(new BlockPos(newPosX, newPosY, newPosZ));
+    }
+
+    public void tick(MinecraftServer server) {
+        for (DynamicConstruct construct : constructs.values()) {
+            //call physics tick
+            construct.physicsTick();
+
+            AABB box = construct.getBoundingBox();
+            ChunkPos minChunk = new ChunkPos(Mth.floor(box.minX) >> 4, Mth.floor(box.minZ) >> 4);
+            ChunkPos maxChunk = new ChunkPos(Mth.ceil(box.maxX) >> 4, Mth.ceil(box.maxZ) >> 4);
+
+            minChunk = new ChunkPos(minChunk.x - 1, minChunk.z - 1); //todo: work out why its trying to get blocks in the chunks outside of this boundary. best guess is attempting to check block outside of boundary to see if it culls face or not? neighbouring chunk block data?
+            maxChunk = new ChunkPos(maxChunk.x + 1, maxChunk.z + 1);
+
+            // Force-load chunks for ticking
+            for (int x = minChunk.x; x <= maxChunk.x; x++) {
+                for (int z = minChunk.z; z <= maxChunk.z; z++) {
+                    simDimension.setChunkForced(x, z, true);
+                }
+            }
+
+            // Send section data to players regardless of dimension
+            for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+                if (!player.connection.isAcceptingMessages()) continue;
+
+                Vec3 playerPos = player.position();
+                if (construct.getRenderBoundingBox().intersects(
+                        playerPos.x - 128, playerPos.y - 128, playerPos.z - 128,
+                        playerPos.x + 128, playerPos.y + 128, playerPos.z + 128)) {
+
+                    sendChunkDataToPlayer(player, construct, minChunk, maxChunk);
+                }
+            }
+        }
+    }
+
+    private void sendChunkDataToPlayer(ServerPlayer player, DynamicConstruct construct, ChunkPos minChunk, ChunkPos maxChunk) {
+        List<CompoundTag> sectionNBTs = new ArrayList<>();
+
+        for (int cx = minChunk.x; cx <= maxChunk.x; cx++) {
+            for (int cz = minChunk.z; cz <= maxChunk.z; cz++) {
+                LevelChunk chunk = simDimension.getChunk(cx, cz);
+                LevelChunkSection[] sections = chunk.getSections();
+
+                CompoundTag chunkTag = new CompoundTag();
+                chunkTag.putInt("xPos", cx);
+                chunkTag.putInt("zPos", cz);
+
+                CompoundTag sectionsTag = new CompoundTag();
+
+                for (int y = 0; y < sections.length; y++) {
+                    LevelChunkSection section = sections[y];
+                    if (section != null && !section.hasOnlyAir()) {
+                        FriendlyByteBuf buf = new FriendlyByteBuf(Unpooled.buffer());
+                        section.write(buf);
+                        sectionsTag.putByteArray(Integer.toString(y + chunk.getMinSection()), buf.array());
+                    }
+                }
+
+                chunkTag.put("Sections", sectionsTag);
+                sectionNBTs.add(chunkTag);
+            }
+        }
+
+        ConstructSectionDataS2CPacket packet = new ConstructSectionDataS2CPacket(
+                construct.getId(),
+                construct.getSimOrigin(),
+                minChunk.x, minChunk.z,
+                maxChunk.x - minChunk.x + 1,
+                maxChunk.z - minChunk.z + 1,
+                sectionNBTs
+        );
+
+        ServerPlayNetworking.send(player, packet);
+    }
+
+    public List<DynamicConstruct> getNearbyConstructs(Vec3 center, int chunkRadius) {
+        int radiusBlocks = chunkRadius * 16;
+        return constructs.values().stream()
+                .filter(construct -> {
+                    AABB box = construct.getBoundingBox();
+                    return box.intersects(center.x - radiusBlocks, center.y - radiusBlocks, center.z - radiusBlocks,
+                            center.x + radiusBlocks, center.y + radiusBlocks, center.z + radiusBlocks);
+                })
+                .toList();
+    }
+
+    public Level getSimDimension() {
+        return this.simDimension;
+    }
+
+    public Optional<Vec3> getPosition(UUID id) {
+        DynamicConstruct construct = this.constructs.get(id);
+        if (construct == null) {
+            return Optional.empty();
+        } else {
+            return Optional.of(construct.getPosition());
+        }
+    }
+
+    public Quaternionf getRotation(UUID id) {
+        return this.constructs.get(id).getRotation();
+    }
+}

@@ -1,0 +1,11 @@
+{
+	"required": true,
+	"package": "dev.manifold.mixin",
+	"compatibilityLevel": "JAVA_21",
+	"mixins": [
+		"ServerLevelSaveMixin"
+	],
+	"injectors": {
+		"defaultRequire": 1
+	}
+}
