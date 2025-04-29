@@ -1,10 +1,9 @@
 package dev.manifold;
 
-import dev.manifold.network.ConstructSectionDataS2CPacket;
+import dev.manifold.network.packets.ConstructSectionDataS2CPacket;
 import io.netty.buffer.Unpooled;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.SectionPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.server.MinecraftServer;
@@ -19,8 +18,6 @@ import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.LevelChunkSection;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
-import org.jetbrains.annotations.Nullable;
-import org.joml.Matrix4f;
 import org.joml.Quaternionf;
 import org.joml.Vector2i;
 
@@ -127,11 +124,12 @@ public class ConstructManager {
         return constructs;
     }
 
-    public void placeBlockInConstruct(UUID id, BlockPos rel, BlockState state) {
-        DynamicConstruct construct = constructs.get(id);
+    public void placeBlockInConstruct(UUID uuid, BlockPos rel, BlockState state) {
+        DynamicConstruct construct = constructs.get(uuid);
         if (construct == null) return;
         BlockPos absolute = construct.getSimOrigin().offset(rel);
         simDimension.setBlock(absolute, state, 3);
+        this.expandBounds(uuid, rel);
     }
 
     public void expandBounds(UUID id, BlockPos rel) {
@@ -260,5 +258,13 @@ public class ConstructManager {
 
     public Quaternionf getRotation(UUID id) {
         return this.constructs.get(id).getRotation();
+    }
+
+    public AABB getAABB(UUID id) {
+        return constructs.get(id).getBoundingBox();
+    }
+
+    public AABB getRenderAABB(UUID id) {
+        return constructs.get(id).getRenderBoundingBox();
     }
 }

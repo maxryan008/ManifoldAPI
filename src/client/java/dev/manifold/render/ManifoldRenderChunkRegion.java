@@ -8,11 +8,15 @@ import net.minecraft.core.SectionPos;
 import net.minecraft.world.level.BlockAndTintGetter;
 import net.minecraft.world.level.ColorResolver;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.lighting.LevelLightEngine;
 import net.minecraft.world.level.material.FluidState;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+
+import java.util.Optional;
 
 @Environment(EnvType.CLIENT)
 public class ManifoldRenderChunkRegion implements BlockAndTintGetter {
@@ -33,15 +37,16 @@ public class ManifoldRenderChunkRegion implements BlockAndTintGetter {
     }
 
     @Override
-    public BlockState getBlockState(BlockPos pos) {
-        return getChunk(
+    public @NotNull BlockState getBlockState(BlockPos pos) {
+        Optional<ManifoldRenderChunk> chunk = getChunk(
                 SectionPos.blockToSectionCoord(pos.getX()),
                 SectionPos.blockToSectionCoord(pos.getZ())
-        ).getBlockState(pos);
+        );
+        return chunk.map(manifoldRenderChunk -> manifoldRenderChunk.getBlockState(pos)).orElse(Blocks.AIR.defaultBlockState());
     }
 
     @Override
-    public FluidState getFluidState(BlockPos pos) {
+    public @NotNull FluidState getFluidState(BlockPos pos) {
         return getBlockState(pos).getFluidState();
     }
 
@@ -51,17 +56,18 @@ public class ManifoldRenderChunkRegion implements BlockAndTintGetter {
     }
 
     @Override
-    public LevelLightEngine getLightEngine() {
+    public @NotNull LevelLightEngine getLightEngine() {
         return level.getLightEngine();
     }
 
     @Nullable
     @Override
     public BlockEntity getBlockEntity(BlockPos pos) {
-        return getChunk(
+        Optional<ManifoldRenderChunk> chunk = getChunk(
                 SectionPos.blockToSectionCoord(pos.getX()),
                 SectionPos.blockToSectionCoord(pos.getZ())
-        ).getBlockEntity(pos);
+        );
+        return chunk.map(manifoldRenderChunk -> manifoldRenderChunk.getBlockEntity(pos)).orElse(null);
     }
 
     @Override
@@ -79,12 +85,13 @@ public class ManifoldRenderChunkRegion implements BlockAndTintGetter {
         return level.getHeight();
     }
 
-    private ManifoldRenderChunk getChunk(int chunkX, int chunkZ) {
+    private Optional<ManifoldRenderChunk> getChunk(int chunkX, int chunkZ) {
         int dx = chunkX - minChunkX;
         int dz = chunkZ - minChunkZ;
         if (dx < 0 || dx >= chunkCountX || dz < 0 || dz >= chunkCountZ) {
-            throw new IndexOutOfBoundsException("Chunk index out of bounds: " + chunkX + ", " + chunkZ);
+            System.out.println("Chunk index out of bounds: " + chunkX + ", " + chunkZ);
+            return Optional.empty();
         }
-        return chunks[dx + dz * chunkCountX];
+        return Optional.of(chunks[dx + dz * chunkCountX]);
     }
 }

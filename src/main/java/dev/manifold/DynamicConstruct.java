@@ -92,7 +92,7 @@ public class DynamicConstruct {
 
     public AABB getRenderBoundingBox() {
         Vec3 min = position.add(negativeBounds.getX(), negativeBounds.getY(), negativeBounds.getZ());
-        Vec3 max = position.add(positiveBounds.getX(), positiveBounds.getY(), positiveBounds.getZ());
+        Vec3 max = position.add(positiveBounds.getX(), positiveBounds.getY(), positiveBounds.getZ()).add(1, 1, 1);
         return new AABB(new Vec3(min.x, min.y, min.z), new Vec3(max.x, max.y, max.z));
     }
 

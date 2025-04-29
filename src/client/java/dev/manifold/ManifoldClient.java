@@ -1,8 +1,7 @@
 package dev.manifold;
 
-import com.mojang.blaze3d.vertex.PoseStack;
-import dev.manifold.init.PacketRegistry;
-import dev.manifold.network.ConstructSectionDataS2CPacket;
+import dev.manifold.network.packets.ConstructSectionDataS2CPacket;
+import dev.manifold.network.packets.PlaceInConstructC2SPacket;
 import dev.manifold.render.ManifoldRenderChunk;
 import dev.manifold.render.ManifoldRenderChunkRegion;
 import io.netty.buffer.Unpooled;
@@ -12,43 +11,47 @@ import net.fabricmc.api.Environment;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderEvents;
-import net.fabricmc.fabric.mixin.registry.sync.RegistriesAccessor;
 import net.minecraft.client.Camera;
 import net.minecraft.client.Minecraft;
-import net.minecraft.core.Registry;
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.NbtOps;
 import net.minecraft.nbt.Tag;
 import net.minecraft.network.FriendlyByteBuf;
-import net.minecraft.server.MinecraftServer;
 import net.minecraft.util.Mth;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.level.biome.Biome;
-import net.minecraft.world.level.biome.Biomes;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.LevelChunkSection;
-import net.minecraft.world.level.chunk.PalettedContainer;
-import net.minecraft.world.level.chunk.storage.ChunkSerializer;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.phys.shapes.VoxelShape;
+import org.jetbrains.annotations.Nullable;
+import org.joml.Matrix4f;
+import org.joml.Vector4f;
 
 import java.util.List;
+import java.util.Optional;
 
 @Environment(EnvType.CLIENT)
 public class ManifoldClient implements ClientModInitializer {
 	private static ConstructRenderCache renderer = null;
+	public static @Nullable ManifoldRenderChunkRegion currentConstructRegion;
 	public static long lastServerUpdateTime = System.currentTimeMillis();
 	public static final long SERVER_TICK_MS = 50L;
+	public static @Nullable ConstructBlockHitResult lastConstructHit;
 
 	@Override
 	public void onInitializeClient() {
 		Manifold.LOGGER.info("Starting Client Initialization");
-
-		PacketRegistry.register();
 
 		// Initialize renderer later once levelRenderer is non-null
 		ClientTickEvents.END_CLIENT_TICK.register(client -> {
@@ -56,17 +59,31 @@ public class ManifoldClient implements ClientModInitializer {
 				renderer = new ConstructRenderCache();
 				Manifold.LOGGER.info("ConstructRenderCache initialized.");
 			}
+
+			if (client.options.keyUse.isDown() && client.hitResult instanceof ConstructBlockHitResult) {
+				tryPlaceBlock(client);
+			}
 		});
 
-		// Register world rendering hook
+		// Register world rendering hook for sections
 		WorldRenderEvents.END.register(context -> {
 			if (Minecraft.getInstance().player == null || renderer == null) return;
 			Camera camera = Minecraft.getInstance().gameRenderer.getMainCamera();
 			Vec3 camPos = camera.getPosition();
 			long now = System.currentTimeMillis();
 			float alpha = Mth.clamp((now - lastServerUpdateTime) / (float) SERVER_TICK_MS, 0f, 1f);
-			renderer.renderAll(context.matrixStack(), camPos, alpha);
+			renderer.renderSections(context.matrixStack(), camPos, alpha);
 		});
+
+		// Register world rendering hook for outline
+		WorldRenderEvents.AFTER_ENTITIES.register((worldRenderContext) -> {
+			if (Minecraft.getInstance().player == null || renderer == null) return;
+			Camera camera = Minecraft.getInstance().gameRenderer.getMainCamera();
+			Vec3 camPos = camera.getPosition();
+			long now = System.currentTimeMillis();
+			float alpha = Mth.clamp((now - lastServerUpdateTime) / (float) SERVER_TICK_MS, 0f, 1f);
+			renderer.renderOutline(worldRenderContext.matrixStack(), camPos, alpha);
+        });
 
 		ClientPlayNetworking.registerGlobalReceiver(
 				ConstructSectionDataS2CPacket.TYPE,
@@ -112,6 +129,8 @@ public class ManifoldClient implements ClientModInitializer {
 								level, packet.minChunkX(), packet.minChunkZ(), countX, countZ, chunkArray
 						);
 
+						ManifoldClient.currentConstructRegion = region;
+
 						renderer.uploadMesh(packet.constructId(), packet.origin(), region);
 					});
 				}
@@ -121,4 +140,89 @@ public class ManifoldClient implements ClientModInitializer {
 	public static ConstructRenderCache getRenderer() {
 		return renderer;
 	}
+
+	public static Optional<ConstructBlockHitResult> pickConstructHit(Vec3 cameraPos, Vec3 viewVec, double maxDistance, Entity player) {
+		if (renderer == null) return Optional.empty();
+		Level simLevel = ConstructManager.INSTANCE.getSimDimension();
+		if (simLevel == null) return null;
+		Camera camera = Minecraft.getInstance().gameRenderer.getMainCamera();
+		Vec3 camPos = camera.getPosition();
+		long now = System.currentTimeMillis();
+		float alpha = Mth.clamp((now - lastServerUpdateTime) / (float) SERVER_TICK_MS, 0f, 1f);
+
+		Vec3 rayEnd = cameraPos.add(viewVec.scale(maxDistance));
+		ConstructBlockHitResult closestHit = null;
+		double closestDistSq = maxDistance * maxDistance;
+
+		for (ConstructRenderCache.CachedConstruct construct : renderer.getRenderedConstructs().values()) {
+			AABB aabb = construct.getTransformedAABB(alpha); // AABB in world-space
+			if (!aabb.contains(cameraPos) && !aabb.clip(cameraPos, rayEnd).isPresent()) continue;
+
+			Vec3 constructPos = construct.prevPosition().lerp(construct.currentPosition(), alpha);
+			Vec3 offset = new Vec3(
+					construct.origin().getX() - constructPos.x,
+					construct.origin().getY() - constructPos.y,
+					construct.origin().getZ() - constructPos.z
+			);
+
+			// This takes world-space positions and maps them into sim-dimension space
+			Vec3 localStart = cameraPos.add(offset);
+			Vec3 localEnd = rayEnd.add(offset);
+
+			BlockHitResult localHit = raycastIntoConstructDimension(construct, localStart, localEnd, player, simLevel);
+			if (localHit != null && localHit.getType() == HitResult.Type.BLOCK) {
+				Vec3 worldHitPos = localHit.getLocation().subtract(offset);
+				double distSq = worldHitPos.distanceToSqr(cameraPos);
+				if (distSq < closestDistSq) {
+					closestDistSq = distSq;
+					BlockState state = simLevel.getBlockState(localHit.getBlockPos());
+					VoxelShape shape = state.getShape(simLevel, localHit.getBlockPos());
+					closestHit = new ConstructBlockHitResult(construct, shape, localHit);
+				}
+			}
+		}
+
+		return Optional.ofNullable(closestHit);
+	}
+
+	private static Vec3 transformVec3(Vec3 vec, Matrix4f transform) {
+		Vector4f v = new Vector4f((float) vec.x, (float) vec.y, (float) vec.z, 1.0f);
+		v.mul(transform);
+		return new Vec3(v.x(), v.y(), v.z());
+	}
+
+	private static BlockHitResult raycastIntoConstructDimension(ConstructRenderCache.CachedConstruct construct, Vec3 localStart, Vec3 localEnd, Entity player, Level simLevel) {
+		ClipContext context = new ClipContext(
+				localStart,
+				localEnd,
+				ClipContext.Block.OUTLINE,
+				ClipContext.Fluid.NONE,
+				player
+		);
+
+		return simLevel.clip(context);
+	}
+
+	private static void tryPlaceBlock(Minecraft client) {
+		if (client.options.keyUse.isDown() && client.hitResult instanceof ConstructBlockHitResult hit) {
+			System.out.println("Trying to place block " + hit.getBlockPos());
+			ConstructRenderCache.CachedConstruct construct = hit.getConstruct();
+			BlockPos rel = hit.getBlockPos().relative(hit.getDirection()).subtract(construct.origin());
+
+			ItemStack held = client.player.getMainHandItem();
+			Block block = Block.byItem(held.getItem());
+			if (block == Blocks.AIR) return;
+
+			BlockState state = block.defaultBlockState(); // could improve with context later
+
+			ClientPlayNetworking.send(
+					new PlaceInConstructC2SPacket(
+							construct.id(),
+							rel,
+							state
+					)
+			);
+		}
+	}
+
 }

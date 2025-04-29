@@ -6,7 +6,8 @@
 		"accessor.SectionCompilerAccessor",
 		"accessor.SectionRenderDispatcher_CompiledSectionAccessor",
 		"accessor.SectionRenderDispatcher_RenderSectionAccessor",
-		"accessor.SectionRenderDispatcherAccessor"
+		"accessor.SectionRenderDispatcherAccessor",
+		"GameRendererMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1

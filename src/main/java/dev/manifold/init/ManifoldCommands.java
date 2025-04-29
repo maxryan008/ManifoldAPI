@@ -190,7 +190,6 @@ public class ManifoldCommands {
                                                                     manager.placeBlockInConstruct(uuid, rel, state);
 
                                                                     // Update bounds through ConstructManager helper
-                                                                    manager.expandBounds(uuid, rel);
 
                                                                     ctx.getSource().sendSuccess(() -> Component.literal("Block added to construct."), true);
                                                                     return 1;

@@ -2,12 +2,13 @@ package dev.manifold;
 
 import dev.manifold.init.ManifoldCommands;
 import dev.manifold.init.ManifoldDimensions;
+import dev.manifold.init.ServerPacketRegistry;
+import dev.manifold.network.ManifoldPackets;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.server.level.ServerPlayer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -20,6 +21,8 @@ public class Manifold implements ModInitializer {
 
 		ManifoldDimensions.register();
 		CommandRegistrationCallback.EVENT.register(ManifoldCommands::register);
+		ServerPacketRegistry.register();
+		ManifoldPackets.registerC2SPackets();
 
 		ServerLifecycleEvents.SERVER_STARTED.register(server -> {
 			ServerLevel simLevel = server.getLevel(ManifoldDimensions.SIM_WORLD);

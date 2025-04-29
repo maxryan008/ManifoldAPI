@@ -1,4 +1,4 @@
-package dev.manifold.network;
+package dev.manifold.network.packets;
 
 import dev.manifold.Constant;
 import net.minecraft.core.BlockPos;
