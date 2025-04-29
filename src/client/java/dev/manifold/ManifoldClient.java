@@ -38,7 +38,9 @@ import org.jetbrains.annotations.Nullable;
 import org.joml.Matrix4f;
 import org.joml.Vector4f;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 @Environment(EnvType.CLIENT)
@@ -48,6 +50,7 @@ public class ManifoldClient implements ClientModInitializer {
 	public static long lastServerUpdateTime = System.currentTimeMillis();
 	public static final long SERVER_TICK_MS = 50L;
 	public static @Nullable ConstructBlockHitResult lastConstructHit;
+	private static boolean wasUseKeyDown = false;
 
 	@Override
 	public void onInitializeClient() {
@@ -60,9 +63,7 @@ public class ManifoldClient implements ClientModInitializer {
 				Manifold.LOGGER.info("ConstructRenderCache initialized.");
 			}
 
-			if (client.options.keyUse.isDown() && client.hitResult instanceof ConstructBlockHitResult) {
-				tryPlaceBlock(client);
-			}
+			handleConstructPlacement(client);
 		});
 
 		// Register world rendering hook for sections
@@ -96,7 +97,7 @@ public class ManifoldClient implements ClientModInitializer {
 						int countZ = packet.chunkSizeZ();
 
 						Level level = Minecraft.getInstance().level;
-						ManifoldRenderChunk[] chunkArray = new ManifoldRenderChunk[(countX) * (countZ)];
+						Map<Long, ManifoldRenderChunk> chunkArray = new HashMap<Long, ManifoldRenderChunk>();
 
 						for (int i = 0; i < chunkNbtList.size(); i++) {
 							CompoundTag tag = chunkNbtList.get(i);
@@ -117,12 +118,12 @@ public class ManifoldClient implements ClientModInitializer {
 
                                         chunk.getSections()[y - chunk.getMinSection()] = section;
                                     } catch (Exception e) {
-                                        Manifold.LOGGER.warn("Failed to load section y={} for chunk {}", yStr, pos, e);
+                                        Manifold.LOGGER.warn("Failed to load sections y={} for chunk {}", yStr, pos, e);
                                     }
                                 }
                             }
 
-							chunkArray[i] = new ManifoldRenderChunk(chunk);
+							chunkArray.put(ManifoldRenderChunkRegion.chunkPosToLong(pos.x, pos.z),new ManifoldRenderChunk(chunk));
                         }
 
 						ManifoldRenderChunkRegion region = new ManifoldRenderChunkRegion(
@@ -203,8 +204,18 @@ public class ManifoldClient implements ClientModInitializer {
 		return simLevel.clip(context);
 	}
 
+	public static void handleConstructPlacement(Minecraft client) {
+		boolean useKey = client.options.keyUse.isDown();
+
+		if (useKey && !wasUseKeyDown && client.hitResult instanceof ConstructBlockHitResult) {
+			tryPlaceBlock(client);
+		}
+
+		wasUseKeyDown = useKey;
+	}
+
 	private static void tryPlaceBlock(Minecraft client) {
-		if (client.options.keyUse.isDown() && client.hitResult instanceof ConstructBlockHitResult hit) {
+		if (client.hitResult instanceof ConstructBlockHitResult hit) {
 			System.out.println("Trying to place block " + hit.getBlockPos());
 			ConstructRenderCache.CachedConstruct construct = hit.getConstruct();
 			BlockPos rel = hit.getBlockPos().relative(hit.getDirection()).subtract(construct.origin());
@@ -224,5 +235,4 @@ public class ManifoldClient implements ClientModInitializer {
 			);
 		}
 	}
-
 }

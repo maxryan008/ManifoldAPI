@@ -4,6 +4,7 @@ import com.mojang.blaze3d.vertex.BufferBuilder;
 import com.mojang.blaze3d.vertex.MeshData;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexSorting;
+import dev.manifold.BlockGetter;
 import dev.manifold.mixin.accessor.SectionCompilerAccessor;
 import it.unimi.dsi.fastutil.objects.Reference2ObjectArrayMap;
 import net.fabricmc.api.EnvType;
@@ -34,7 +35,7 @@ public class ManifoldSectionCompiler extends SectionCompiler {
     }
 
     public SectionCompiler.Results compile(
-            SectionPos sectionPos, ManifoldRenderChunkRegion renderChunkRegion, VertexSorting vertexSorting, SectionBufferBuilderPack sectionBufferBuilderPack
+            SectionPos sectionPos, BlockGetter renderChunkRegion, VertexSorting vertexSorting, SectionBufferBuilderPack sectionBufferBuilderPack
     ) {
         SectionCompiler.Results results = new SectionCompiler.Results();
         BlockPos blockPos = sectionPos.origin();

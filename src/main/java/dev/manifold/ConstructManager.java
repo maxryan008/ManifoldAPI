@@ -143,13 +143,13 @@ public class ConstructManager {
         System.out.println("Negative Bounds " + neg);
         System.out.println("Positive Bounds " + pos);
 
-        int newNegX = Math.min(neg.getX(), rel.getX());
-        int newNegY = Math.min(neg.getY(), rel.getY());
-        int newNegZ = Math.min(neg.getZ(), rel.getZ());
+        int newNegX = Math.min(neg.getX(), rel.getX() - 1);
+        int newNegY = Math.min(neg.getY(), rel.getY() - 1);
+        int newNegZ = Math.min(neg.getZ(), rel.getZ() - 1);
 
-        int newPosX = Math.max(pos.getX(), rel.getX());
-        int newPosY = Math.max(pos.getY(), rel.getY());
-        int newPosZ = Math.max(pos.getZ(), rel.getZ());
+        int newPosX = Math.max(pos.getX(), rel.getX() + 1);
+        int newPosY = Math.max(pos.getY(), rel.getY() + 1);
+        int newPosZ = Math.max(pos.getZ(), rel.getZ() + 1);
 
         System.out.println("New Negative Bounds " + new BlockPos(newNegX, newNegY, newNegZ));
         System.out.println("New Positive Bounds " + new BlockPos(newPosX, newPosY, newPosZ));
@@ -167,8 +167,8 @@ public class ConstructManager {
             ChunkPos minChunk = new ChunkPos(Mth.floor(box.minX) >> 4, Mth.floor(box.minZ) >> 4);
             ChunkPos maxChunk = new ChunkPos(Mth.ceil(box.maxX) >> 4, Mth.ceil(box.maxZ) >> 4);
 
-            minChunk = new ChunkPos(minChunk.x - 1, minChunk.z - 1); //todo: work out why its trying to get blocks in the chunks outside of this boundary. best guess is attempting to check block outside of boundary to see if it culls face or not? neighbouring chunk block data?
-            maxChunk = new ChunkPos(maxChunk.x + 1, maxChunk.z + 1);
+            minChunk = new ChunkPos(minChunk.x, minChunk.z);
+            maxChunk = new ChunkPos(maxChunk.x, maxChunk.z);
 
             // Force-load chunks for ticking
             for (int x = minChunk.x; x <= maxChunk.x; x++) {
@@ -253,6 +253,15 @@ public class ConstructManager {
             return Optional.empty();
         } else {
             return Optional.of(construct.getPosition());
+        }
+    }
+
+    public Optional<BlockPos> getSimOrigin(UUID id) {
+        DynamicConstruct construct = this.constructs.get(id);
+        if (construct == null) {
+            return Optional.empty();
+        } else {
+            return Optional.of(construct.getSimOrigin());
         }
     }
 

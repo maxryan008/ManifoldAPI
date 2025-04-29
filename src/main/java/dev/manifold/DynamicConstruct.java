@@ -5,6 +5,7 @@ import com.mojang.serialization.codecs.RecordCodecBuilder;
 import dev.manifold.util.QuaternionData;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.UUIDUtil;
+import net.minecraft.core.Vec3i;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.level.Level;
@@ -62,8 +63,8 @@ public class DynamicConstruct {
         this.world = world;
         this.simOrigin = simOrigin;
 
-        this.negativeBounds = BlockPos.ZERO;
-        this.positiveBounds = BlockPos.ZERO;
+        this.negativeBounds = BlockPos.ZERO.offset(-1, -1, -1);
+        this.positiveBounds = BlockPos.ZERO.offset(1, 1, 1);
 
         this.position = Vec3.ZERO;
         this.velocity = Vec3.ZERO;

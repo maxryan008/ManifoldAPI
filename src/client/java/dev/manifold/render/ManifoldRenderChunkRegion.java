@@ -16,6 +16,7 @@ import net.minecraft.world.level.material.FluidState;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.Map;
 import java.util.Optional;
 
 @Environment(EnvType.CLIENT)
@@ -24,10 +25,11 @@ public class ManifoldRenderChunkRegion implements BlockAndTintGetter {
     private final int chunkCountZ;
     private final int minChunkX;
     private final int minChunkZ;
-    protected final ManifoldRenderChunk[] chunks;
+    protected final Map<Long, ManifoldRenderChunk> chunks;
+
     protected final Level level;
 
-    public ManifoldRenderChunkRegion(Level level, int minChunkX, int minChunkZ, int chunkCountX, int chunkCountZ, ManifoldRenderChunk[] chunks) {
+    public ManifoldRenderChunkRegion(Level level, int minChunkX, int minChunkZ, int chunkCountX, int chunkCountZ, Map<Long, ManifoldRenderChunk> chunks) {
         this.level = level;
         this.minChunkX = minChunkX;
         this.minChunkZ = minChunkZ;
@@ -40,7 +42,7 @@ public class ManifoldRenderChunkRegion implements BlockAndTintGetter {
     public @NotNull BlockState getBlockState(BlockPos pos) {
         Optional<ManifoldRenderChunk> chunk = getChunk(
                 SectionPos.blockToSectionCoord(pos.getX()),
-                SectionPos.blockToSectionCoord(pos.getZ())
+                SectionPos.blockToSectionCoord(pos. getZ())
         );
         return chunk.map(manifoldRenderChunk -> manifoldRenderChunk.getBlockState(pos)).orElse(Blocks.AIR.defaultBlockState());
     }
@@ -92,6 +94,38 @@ public class ManifoldRenderChunkRegion implements BlockAndTintGetter {
             System.out.println("Chunk index out of bounds: " + chunkX + ", " + chunkZ);
             return Optional.empty();
         }
-        return Optional.of(chunks[dx + dz * chunkCountX]);
+        return Optional.of(chunks.get(chunkPosToLong(chunkX, chunkZ)));
+    }
+
+    public int getChunkCountX() {
+        return this.chunkCountX;
+    }
+
+    public int getChunkCountZ() {
+        return this.chunkCountZ;
+    }
+
+    public int getMinChunkX() {
+        return this.minChunkX;
+    }
+
+    public int getMinChunkZ() {
+        return this.minChunkZ;
+    }
+
+    public int getMaxChunkX() {
+        return this.chunkCountX + this.minChunkX;
+    }
+
+    public int getMaxChunkZ() {
+        return this.chunkCountZ + this.minChunkZ;
+    }
+
+    public Map<Long, ManifoldRenderChunk> getChunks() {
+        return chunks;
+    }
+
+    public static long chunkPosToLong(int x, int z) {
+        return ((long)x & 0xFFFFFFFFL) | (((long)z & 0xFFFFFFFFL) << 32);
     }
 }
