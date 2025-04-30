@@ -1,5 +1,6 @@
 package dev.manifold;
 
+import dev.manifold.network.packets.BreakInConstructC2SPacket;
 import dev.manifold.network.packets.ConstructSectionDataS2CPacket;
 import io.netty.buffer.Unpooled;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
@@ -12,6 +13,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.util.Mth;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.LevelChunk;
@@ -130,6 +132,15 @@ public class ConstructManager {
         BlockPos absolute = construct.getSimOrigin().offset(rel);
         simDimension.setBlock(absolute, state, 3);
         this.expandBounds(uuid, rel);
+    }
+
+    public void breakBlockInConstruct(BreakInConstructC2SPacket packet) {
+        DynamicConstruct construct = constructs.get(packet.constructId());
+        if (construct == null) return;
+
+        BlockState oldState = simDimension.getBlockState(packet.blockHitPos());
+        simDimension.setBlock(packet.blockHitPos(), Blocks.AIR.defaultBlockState(), 3);
+        simDimension.levelEvent(2001, packet.blockHitPos(), Block.getId(oldState)); // Show break effect
     }
 
     public void expandBounds(UUID id, BlockPos rel) {

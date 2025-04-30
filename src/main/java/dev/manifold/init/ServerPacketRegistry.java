@@ -1,5 +1,6 @@
 package dev.manifold.init;
 
+import dev.manifold.network.packets.BreakInConstructC2SPacket;
 import dev.manifold.network.packets.ConstructSectionDataS2CPacket;
 import dev.manifold.network.PacketTypes;
 import dev.manifold.network.packets.PlaceInConstructC2SPacket;
@@ -15,6 +16,11 @@ public class ServerPacketRegistry {
         PayloadTypeRegistry.playC2S().register(
                 PacketTypes.PLACE_IN_CONSTRUCT,
                 PlaceInConstructC2SPacket.CODEC
+        );
+
+        PayloadTypeRegistry.playC2S().register(
+                PacketTypes.BREAK_IN_CONSTRUCT,
+                BreakInConstructC2SPacket.CODEC
         );
     }
 }

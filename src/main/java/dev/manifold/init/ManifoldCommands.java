@@ -4,6 +4,7 @@ import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.DoubleArgumentType;
 import dev.manifold.ConstructManager;
 import dev.manifold.DynamicConstruct;
+import dev.manifold.Manifold;
 import net.minecraft.ChatFormatting;
 import net.minecraft.commands.CommandBuildContext;
 import net.minecraft.commands.CommandSourceStack;
@@ -89,7 +90,7 @@ public class ManifoldCommands {
                                                         construct.getSimOrigin().getZ());
 
                                                 // Log to console
-                                                System.out.printf("UUID: %s, Position: %s%n", id, posStr);
+                                                Manifold.LOGGER.debug("UUID: %s, Position: %s%n", id, posStr);
 
                                                 // Create clickable components
                                                 MutableComponent uuidComponent = Component.literal("UUID: " + id.toString())
@@ -133,7 +134,7 @@ public class ManifoldCommands {
 
                                                             String msg = "Created DynamicConstruct with UUID: " + id + " at " + pos;
                                                             source.sendSuccess(() -> Component.literal(msg), false);
-                                                            System.out.println(msg);
+                                                            Manifold.LOGGER.debug(msg);
 
                                                             return 1;
                                                         })

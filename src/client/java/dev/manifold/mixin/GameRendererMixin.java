@@ -29,7 +29,6 @@ public abstract class GameRendererMixin {
 
         Optional<ConstructBlockHitResult> constructHitOpt = ManifoldClient.pickConstructHit(cameraPos, entity.getViewVector(f), maxDistance, entity);
         if (constructHitOpt.isPresent()) {
-            //System.out.println("CONSTRUCT FOUND");
             ConstructBlockHitResult constructHit = constructHitOpt.get();
 
             double vanillaDist = vanillaHit.getLocation().distanceToSqr(cameraPos);
@@ -38,6 +37,7 @@ public abstract class GameRendererMixin {
             if (constructDist < vanillaDist || vanillaHit.getType() == HitResult.Type.MISS) {
                 ManifoldClient.lastConstructHit = constructHit;
                 Minecraft.getInstance().hitResult = constructHit;
+                ManifoldClient.currentConstructRegion = constructHit.getRegion();
                 cir.setReturnValue(constructHit);
             } else {
                 ManifoldClient.lastConstructHit = null;

@@ -1,5 +1,6 @@
 package dev.manifold.render;
 
+import dev.manifold.Manifold;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.minecraft.core.BlockPos;
@@ -42,7 +43,7 @@ public class ManifoldRenderChunkRegion implements BlockAndTintGetter {
     public @NotNull BlockState getBlockState(BlockPos pos) {
         Optional<ManifoldRenderChunk> chunk = getChunk(
                 SectionPos.blockToSectionCoord(pos.getX()),
-                SectionPos.blockToSectionCoord(pos. getZ())
+                SectionPos.blockToSectionCoord(pos.getZ())
         );
         return chunk.map(manifoldRenderChunk -> manifoldRenderChunk.getBlockState(pos)).orElse(Blocks.AIR.defaultBlockState());
     }
@@ -91,7 +92,7 @@ public class ManifoldRenderChunkRegion implements BlockAndTintGetter {
         int dx = chunkX - minChunkX;
         int dz = chunkZ - minChunkZ;
         if (dx < 0 || dx >= chunkCountX || dz < 0 || dz >= chunkCountZ) {
-            System.out.println("Chunk index out of bounds: " + chunkX + ", " + chunkZ);
+            Manifold.LOGGER.warn("Chunk index out of bounds: " + chunkX + ", " + chunkZ);
             return Optional.empty();
         }
         return Optional.of(chunks.get(chunkPosToLong(chunkX, chunkZ)));

@@ -38,10 +38,7 @@ import org.jetbrains.annotations.Nullable;
 import org.joml.Matrix4f;
 import org.joml.Vector4f;
 
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
+import java.util.*;
 
 @Environment(EnvType.CLIENT)
 public class ManifoldClient implements ClientModInitializer {
@@ -51,6 +48,8 @@ public class ManifoldClient implements ClientModInitializer {
 	public static final long SERVER_TICK_MS = 50L;
 	public static @Nullable ConstructBlockHitResult lastConstructHit;
 	private static boolean wasUseKeyDown = false;
+
+	private static Map<UUID, ManifoldRenderChunkRegion> regions = new HashMap<>();
 
 	@Override
 	public void onInitializeClient() {
@@ -62,8 +61,6 @@ public class ManifoldClient implements ClientModInitializer {
 				renderer = new ConstructRenderCache();
 				Manifold.LOGGER.info("ConstructRenderCache initialized.");
 			}
-
-			handleConstructPlacement(client);
 		});
 
 		// Register world rendering hook for sections
@@ -130,7 +127,7 @@ public class ManifoldClient implements ClientModInitializer {
 								level, packet.minChunkX(), packet.minChunkZ(), countX, countZ, chunkArray
 						);
 
-						ManifoldClient.currentConstructRegion = region;
+						regions.put(packet.constructId(), region);
 
 						renderer.uploadMesh(packet.constructId(), packet.origin(), region);
 					});
@@ -178,7 +175,8 @@ public class ManifoldClient implements ClientModInitializer {
 					closestDistSq = distSq;
 					BlockState state = simLevel.getBlockState(localHit.getBlockPos());
 					VoxelShape shape = state.getShape(simLevel, localHit.getBlockPos());
-					closestHit = new ConstructBlockHitResult(construct, shape, localHit);
+					ManifoldRenderChunkRegion region = regions.get(construct.id());
+					closestHit = new ConstructBlockHitResult(construct, shape, localHit, region);
 				}
 			}
 		}
@@ -202,37 +200,5 @@ public class ManifoldClient implements ClientModInitializer {
 		);
 
 		return simLevel.clip(context);
-	}
-
-	public static void handleConstructPlacement(Minecraft client) {
-		boolean useKey = client.options.keyUse.isDown();
-
-		if (useKey && !wasUseKeyDown && client.hitResult instanceof ConstructBlockHitResult) {
-			tryPlaceBlock(client);
-		}
-
-		wasUseKeyDown = useKey;
-	}
-
-	private static void tryPlaceBlock(Minecraft client) {
-		if (client.hitResult instanceof ConstructBlockHitResult hit) {
-			System.out.println("Trying to place block " + hit.getBlockPos());
-			ConstructRenderCache.CachedConstruct construct = hit.getConstruct();
-			BlockPos rel = hit.getBlockPos().relative(hit.getDirection()).subtract(construct.origin());
-
-			ItemStack held = client.player.getMainHandItem();
-			Block block = Block.byItem(held.getItem());
-			if (block == Blocks.AIR) return;
-
-			BlockState state = block.defaultBlockState(); // could improve with context later
-
-			ClientPlayNetworking.send(
-					new PlaceInConstructC2SPacket(
-							construct.id(),
-							rel,
-							state
-					)
-			);
-		}
 	}
 }

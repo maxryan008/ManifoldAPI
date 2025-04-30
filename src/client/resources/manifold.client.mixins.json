@@ -7,7 +7,9 @@
 		"accessor.SectionRenderDispatcher_CompiledSectionAccessor",
 		"accessor.SectionRenderDispatcher_RenderSectionAccessor",
 		"accessor.SectionRenderDispatcherAccessor",
-		"GameRendererMixin"
+		"GameRendererMixin",
+		"MultiPlayerGameModeMixin",
+		"MinecraftMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1
