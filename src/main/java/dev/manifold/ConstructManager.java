@@ -287,4 +287,9 @@ public class ConstructManager {
     public AABB getRenderAABB(UUID id) {
         return constructs.get(id).getRenderBoundingBox();
     }
+
+    public void setRotationalVelocity(UUID uuid, Quaternionf quaternionf) {
+        DynamicConstruct construct = this.constructs.get(uuid);
+        construct.setAngularVelocity(quaternionf);
+    }
 }

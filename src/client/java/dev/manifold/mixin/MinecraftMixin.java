@@ -23,6 +23,7 @@ public class MinecraftMixin {
                         !client.options.keyAttack.isDown()
         ) {
             ConstructBreaker.getInstance().reset(); // Not attacking
+            ConstructBreaker.getInstance().resetDelay();
             return;
         }
 

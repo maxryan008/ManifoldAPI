@@ -3,13 +3,13 @@
 	"package": "dev.manifold.mixin",
 	"compatibilityLevel": "JAVA_21",
 	"client": [
+		"GameRendererMixin",
+		"MinecraftMixin",
+		"MultiPlayerGameModeMixin",
 		"accessor.SectionCompilerAccessor",
 		"accessor.SectionRenderDispatcher_CompiledSectionAccessor",
 		"accessor.SectionRenderDispatcher_RenderSectionAccessor",
-		"accessor.SectionRenderDispatcherAccessor",
-		"GameRendererMixin",
-		"MultiPlayerGameModeMixin",
-		"MinecraftMixin"
+		"accessor.SectionRenderDispatcherAccessor"
 	],
 	"injectors": {
 		"defaultRequire": 1

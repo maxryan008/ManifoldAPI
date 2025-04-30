@@ -21,6 +21,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
+import org.joml.Quaternionf;
 
 import java.util.Map;
 import java.util.UUID;
@@ -222,6 +223,35 @@ public class ManifoldCommands {
 
                                                                                             return 1;
                                                                                         }
+                                                                                )
+                                                                        )
+                                                                )
+                                                        )
+                                                )
+                                        )
+                                )
+
+                                // --- /manifold constructs rotation set <UUID> <x> <y> <z> <w> ---
+                                .then(literal("rotation")
+                                        .then(literal("set")
+                                                .then(argument("uuid", UuidArgument.uuid())
+                                                        .then(argument("x", DoubleArgumentType.doubleArg())
+                                                                .then(argument("y", DoubleArgumentType.doubleArg())
+                                                                        .then(argument("z", DoubleArgumentType.doubleArg())
+                                                                                .then(argument("w", DoubleArgumentType.doubleArg())
+                                                                                        .executes(ctx -> {
+                                                                                            UUID uuid = UuidArgument.getUuid(ctx, "uuid");
+                                                                                            double x = DoubleArgumentType.getDouble(ctx, "x");
+                                                                                            double y = DoubleArgumentType.getDouble(ctx, "y");
+                                                                                            double z = DoubleArgumentType.getDouble(ctx, "z");
+                                                                                            double w = DoubleArgumentType.getDouble(ctx, "w");
+
+                                                                                            ServerPlayer player = ctx.getSource().getPlayerOrException();
+
+                                                                                            ConstructManager.INSTANCE.setRotationalVelocity(uuid, new Quaternionf((float)x, (float)y, (float)z, (float)w));
+
+                                                                                            return 1;
+                                                                                        })
                                                                                 )
                                                                         )
                                                                 )
