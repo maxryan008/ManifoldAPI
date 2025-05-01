@@ -12,6 +12,7 @@ import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderEvents;
 import net.minecraft.client.Camera;
 import net.minecraft.client.Minecraft;
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.Tag;
@@ -31,6 +32,8 @@ import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.VoxelShape;
 import org.jetbrains.annotations.Nullable;
 import org.joml.Matrix4f;
+import org.joml.Quaternionf;
+import org.joml.Vector3f;
 import org.joml.Vector4f;
 
 import java.util.*;
@@ -148,35 +151,62 @@ public class ManifoldClient implements ClientModInitializer {
 		double closestDistSq = maxDistance * maxDistance;
 
 		for (ConstructRenderCache.CachedConstruct construct : renderer.getRenderedConstructs().values()) {
-			AABB aabb = construct.getTransformedAABB(alpha); // AABB in world-space
-			if (!aabb.contains(cameraPos) && !aabb.clip(cameraPos, rayEnd).isPresent()) continue;
+			//Compute inverse rotation and position
+			Vec3 interpolatedConstructPosition = construct.prevPosition().lerp(construct.currentPosition(), alpha);
+			Quaternionf interpolatedRotation = new Quaternionf(construct.prevRotation()).slerp(construct.currentRotation(), alpha);
+			Quaternionf inverseInterpolatedRotation = new Quaternionf(interpolatedRotation).invert();
+			BlockPos simOrigin = construct.origin();
 
-			Vec3 constructPos = construct.prevPosition().lerp(construct.currentPosition(), alpha);
+			//Transform ray into construct-local space (unrotated frame)
+			Vec3 localStart = rotateVec(cameraPos.subtract(interpolatedConstructPosition), inverseInterpolatedRotation);
+			Vec3 localEnd = rotateVec(rayEnd.subtract(interpolatedConstructPosition), inverseInterpolatedRotation);
+
+			localStart = localStart.add(interpolatedConstructPosition);
+			localEnd = localEnd.add(interpolatedConstructPosition);
+
+			//Shift AABB to construct-local space
+			AABB localAABB = ConstructManager.INSTANCE.getRenderAABB(construct.id());
+
+			//Perform early rejection (stay in local space!)
+			if (!localAABB.contains(localStart) && !localAABB.clip(localStart, localEnd).isPresent()) continue;
+
+			//Transform ray back into sim-dimension world space
+			Vec3 simStart = localStart.add(Vec3.atLowerCornerOf(simOrigin)).subtract(interpolatedConstructPosition);
+			Vec3 simEnd = localEnd.add(Vec3.atLowerCornerOf(simOrigin)).subtract(interpolatedConstructPosition);
+
+			//Offset used to convert sim hit -> world-space
 			Vec3 offset = new Vec3(
-					construct.origin().getX() - constructPos.x,
-					construct.origin().getY() - constructPos.y,
-					construct.origin().getZ() - constructPos.z
+					simOrigin.getX() - interpolatedConstructPosition.x,
+					simOrigin.getY() - interpolatedConstructPosition.y,
+					simOrigin.getZ() - interpolatedConstructPosition.z
 			);
 
-			// This takes world-space positions and maps them into sim-dimension space
-			Vec3 localStart = cameraPos.add(offset);
-			Vec3 localEnd = rayEnd.add(offset);
+			//Perform real sim-dimension raycast
+			BlockHitResult localHitResult = raycastIntoConstructDimension(construct, simStart, simEnd, player, simLevel);
 
-			BlockHitResult localHit = raycastIntoConstructDimension(construct, localStart, localEnd, player, simLevel);
-			if (localHit != null && localHit.getType() == HitResult.Type.BLOCK) {
-				Vec3 worldHitPos = localHit.getLocation().subtract(offset);
+			if (localHitResult.getType() == HitResult.Type.BLOCK) {
+				Vec3 simHit = localHitResult.getLocation();
+				Vec3 localHit = simHit.subtract(Vec3.atLowerCornerOf(simOrigin));
+				Vec3 rotatedHit = rotateVec(localHit, interpolatedRotation);
+				Vec3 worldHitPos = rotatedHit.add(interpolatedConstructPosition);
 				double distSq = worldHitPos.distanceToSqr(cameraPos);
 				if (distSq < closestDistSq) {
 					closestDistSq = distSq;
-					BlockState state = simLevel.getBlockState(localHit.getBlockPos());
-					VoxelShape shape = state.getShape(simLevel, localHit.getBlockPos());
+					BlockState state = simLevel.getBlockState(localHitResult.getBlockPos());
+					VoxelShape shape = state.getShape(simLevel, localHitResult.getBlockPos());
 					ManifoldRenderChunkRegion region = regions.get(construct.id());
-					closestHit = new ConstructBlockHitResult(construct, shape, localHit, region);
+					closestHit = new ConstructBlockHitResult(construct, shape, localHitResult, region);
 				}
 			}
 		}
 
 		return Optional.ofNullable(closestHit);
+	}
+
+	private static Vec3 rotateVec(Vec3 vec, Quaternionf quat) {
+		Vector3f v = new Vector3f((float) vec.x, (float) vec.y, (float) vec.z);
+		v.rotate(quat);
+		return new Vec3(v.x(), v.y(), v.z());
 	}
 
 	private static Vec3 transformVec3(Vec3 vec, Matrix4f transform) {

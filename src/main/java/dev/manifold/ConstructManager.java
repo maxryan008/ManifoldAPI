@@ -276,8 +276,13 @@ public class ConstructManager {
         }
     }
 
-    public Quaternionf getRotation(UUID id) {
-        return this.constructs.get(id).getRotation();
+    public Optional<Quaternionf> getRotation(UUID id) {
+        DynamicConstruct construct = this.constructs.get(id);
+        if (construct == null) {
+            return Optional.empty();
+        } else {
+            return Optional.of(construct.getRotation());
+        }
     }
 
     public AABB getAABB(UUID id) {
