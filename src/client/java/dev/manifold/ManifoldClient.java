@@ -1,6 +1,7 @@
 package dev.manifold;
 
 import dev.manifold.network.packets.ConstructSectionDataS2CPacket;
+import dev.manifold.network.packets.PickConstructBlockWithDataS2CPacket;
 import dev.manifold.render.ManifoldRenderChunk;
 import dev.manifold.render.ManifoldRenderChunkRegion;
 import io.netty.buffer.Unpooled;
@@ -12,16 +13,23 @@ import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderEvents;
 import net.minecraft.client.Camera;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.RegistryAccess;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.util.Mth;
+import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.item.BlockItem;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.LevelChunkSection;
@@ -35,6 +43,7 @@ import org.joml.Matrix4f;
 import org.joml.Quaternionf;
 import org.joml.Vector3f;
 import org.joml.Vector4f;
+import org.spongepowered.asm.mixin.Unique;
 
 import java.util.*;
 
@@ -128,6 +137,41 @@ public class ManifoldClient implements ClientModInitializer {
 						regions.put(packet.constructId(), region);
 
 						renderer.uploadMesh(packet.constructId(), packet.origin(), region);
+					});
+				}
+		);
+
+		ClientPlayNetworking.registerGlobalReceiver(
+				PickConstructBlockWithDataS2CPacket.TYPE,
+				(packet, context) -> {
+					context.client().execute(() -> {
+						Minecraft minecraft = Minecraft.getInstance();
+						LocalPlayer player = minecraft.player;
+						if (player == null) return;
+
+						boolean creative = player.getAbilities().instabuild;
+						ItemStack itemStack = ItemStack.parse(minecraft.level.registryAccess(), packet.itemTag()).orElse(ItemStack.EMPTY);
+
+						if (itemStack.isEmpty()) {
+							Manifold.LOGGER.warn("Picking construct block with data returned empty item: {}", packet.itemTag().toString());
+							return;
+						}
+
+						Inventory inventory = player.getInventory();
+						int i = inventory.findSlotMatchingItem(itemStack);
+
+						if (creative) {
+							inventory.setPickedItem(itemStack);
+							assert minecraft.gameMode != null;
+							minecraft.gameMode.handleCreativeModeItemAdd(player.getItemInHand(InteractionHand.MAIN_HAND), 36 + inventory.selected);
+						} else if (i != -1) {
+							if (Inventory.isHotbarSlot(i)) {
+								inventory.selected = i;
+							} else {
+								assert minecraft.gameMode != null;
+								minecraft.gameMode.handlePickItem(i);
+							}
+						}
 					});
 				}
 		);
@@ -225,5 +269,14 @@ public class ManifoldClient implements ClientModInitializer {
 		);
 
 		return simLevel.clip(context);
+	}
+
+	@Unique
+	private void addCustomNbtData(ItemStack itemStack, BlockEntity blockEntity, RegistryAccess registryAccess) {
+		CompoundTag compoundTag = blockEntity.saveCustomAndMetadata(registryAccess);
+		//noinspection deprecation
+		blockEntity.removeComponentsFromTag(compoundTag);
+		BlockItem.setBlockEntityData(itemStack, blockEntity.getType(), compoundTag);
+		itemStack.applyComponents(blockEntity.collectComponents());
 	}
 }
