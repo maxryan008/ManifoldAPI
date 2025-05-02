@@ -5,6 +5,7 @@ import net.minecraft.nbt.Tag;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import org.jetbrains.annotations.NotNull;
 
 public record PickConstructBlockWithDataS2CPacket(Tag itemTag) implements CustomPacketPayload {
     public static final Type<PickConstructBlockWithDataS2CPacket> TYPE =
@@ -23,7 +24,7 @@ public record PickConstructBlockWithDataS2CPacket(Tag itemTag) implements Custom
     }
 
     @Override
-    public Type<? extends CustomPacketPayload> type() {
+    public @NotNull Type<? extends CustomPacketPayload> type() {
         return TYPE;
     }
 }

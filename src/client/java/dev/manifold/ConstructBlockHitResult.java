@@ -3,6 +3,7 @@ package dev.manifold;
 import dev.manifold.render.ManifoldRenderChunkRegion;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.shapes.VoxelShape;
+import org.jetbrains.annotations.NotNull;
 
 public class ConstructBlockHitResult extends BlockHitResult {
     private final ConstructRenderCache.CachedConstruct construct;
@@ -29,7 +30,7 @@ public class ConstructBlockHitResult extends BlockHitResult {
     }
 
     @Override
-    public Type getType() {
+    public @NotNull Type getType() {
         return Type.BLOCK;
     }
 }

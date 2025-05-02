@@ -15,8 +15,8 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public class ServerLevelSaveMixin {
     @Inject(method = "save", at = @At("TAIL"))
     private void onSave(@Nullable ProgressListener progressListener, boolean flush, boolean savingChunks, CallbackInfo ci) {
-        ServerLevel level = (ServerLevel)(Object)this;
-        if (!level.dimension().equals(ManifoldDimensions.SIM_DIMENSION)) return;
+        ServerLevel level = (ServerLevel) (Object) this;
+        if (!level.dimension().equals(ManifoldDimensions.SIM_WORLD)) return;
 
         ConstructManager manager = ConstructManager.INSTANCE;
         if (manager == null) return;

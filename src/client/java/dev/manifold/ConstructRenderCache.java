@@ -25,16 +25,12 @@ import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.VoxelShape;
 import org.joml.Matrix4f;
 import org.joml.Quaternionf;
-import org.joml.Vector3f;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.util.*;
 import java.util.concurrent.atomic.AtomicReference;
 
 public class ConstructRenderCache {
 
-    private static final Logger log = LoggerFactory.getLogger(ConstructRenderCache.class);
     private final Minecraft MC = Minecraft.getInstance();
     private final SectionRenderDispatcher dispatcher = MC.levelRenderer.getSectionRenderDispatcher();
     private final ManifoldSectionCompiler compiler = new ManifoldSectionCompiler(MC.getBlockRenderer(), MC.getBlockEntityRenderDispatcher());
@@ -58,6 +54,7 @@ public class ConstructRenderCache {
         });
     }
 
+    @SuppressWarnings("DataFlowIssue")
     public void uploadMesh(UUID id, BlockPos origin, ManifoldRenderChunkRegion region) {
         List<ManifoldRenderSection> sectionList = new ArrayList<>();
 
@@ -113,6 +110,7 @@ public class ConstructRenderCache {
 
         Optional<Vec3> renderPositionOptional = ConstructManager.INSTANCE.getPosition(id);
         Optional<Quaternionf> renderRotationOptional = ConstructManager.INSTANCE.getRotation(id);
+        assert renderRotationOptional.isPresent();
         if (renderPositionOptional.isPresent()) {
             if (renderSections.containsKey(id)) {
                 renderSections.put(id, new CachedConstruct(id, origin, sectionList, renderSections.get(id).currentPosition, renderPositionOptional.get(), renderSections.get(id).currentRotation, renderRotationOptional.get()));
@@ -210,26 +208,5 @@ public class ConstructRenderCache {
             Vec3 currentPosition,
             Quaternionf prevRotation,
             Quaternionf currentRotation
-    ) {
-        public Matrix4f transform(float deltaTicks, Vec3 camPos) {
-            // Interpolate render position
-            Vec3 interpolatedPosition = prevPosition.lerp(currentPosition, deltaTicks);
-            Quaternionf interpolatedRotation = new Quaternionf(prevRotation).slerp(currentRotation, deltaTicks);
-
-            // Construct the transform matrix
-            Matrix4f transform = new Matrix4f();
-
-            // Apply rotation from ConstructManager
-            transform.rotate(interpolatedRotation);
-
-            // Apply translation (interpolatedPosition - camPos)
-            transform.translate(new Vector3f(
-                    (float) (interpolatedPosition.x - camPos.x),
-                    (float) (interpolatedPosition.y - camPos.y),
-                    (float) (interpolatedPosition.z - camPos.z)
-            ));
-
-            return transform;
-        }
-    }
+    ) {}
 }

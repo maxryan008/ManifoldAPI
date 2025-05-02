@@ -5,6 +5,7 @@ import net.minecraft.world.Container;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.*;
 import net.minecraft.world.item.ItemStack;
+import org.jetbrains.annotations.NotNull;
 
 import java.util.List;
 import java.util.OptionalInt;
@@ -23,7 +24,7 @@ public class ConstructContainerMenu extends AbstractContainerMenu {
     }
 
     @Override
-    public ItemStack quickMoveStack(Player player, int i) {
+    public @NotNull ItemStack quickMoveStack(Player player, int i) {
         return wrapped.quickMoveStack(player, i);
     }
 
@@ -33,23 +34,28 @@ public class ConstructContainerMenu extends AbstractContainerMenu {
     }
 
     @Override
-    public NonNullList<ItemStack> getItems() {
+    public @NotNull NonNullList<ItemStack> getItems() {
         return wrapped.getItems();
     }
 
     @Override
-    public MenuType<?> getType() {
+    public @NotNull MenuType<?> getType() {
         return wrapped.getType();
     }
 
     @Override
-    public Slot getSlot(int i) {
+    public @NotNull Slot getSlot(int i) {
         return wrapped.getSlot(i);
     }
 
     @Override
-    public ItemStack getCarried() {
+    public @NotNull ItemStack getCarried() {
         return wrapped.getCarried();
+    }
+
+    @Override
+    public void setCarried(ItemStack itemStack) {
+        wrapped.setCarried(itemStack);
     }
 
     @Override
@@ -63,7 +69,7 @@ public class ConstructContainerMenu extends AbstractContainerMenu {
     }
 
     @Override
-    public OptionalInt findSlot(Container container, int i) {
+    public @NotNull OptionalInt findSlot(Container container, int i) {
         return wrapped.findSlot(container, i);
     }
 
@@ -80,11 +86,6 @@ public class ConstructContainerMenu extends AbstractContainerMenu {
     @Override
     public void suppressRemoteUpdates() {
         wrapped.suppressRemoteUpdates();
-    }
-
-    @Override
-    public void setCarried(ItemStack itemStack) {
-        wrapped.setCarried(itemStack);
     }
 
     @Override

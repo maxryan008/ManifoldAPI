@@ -71,9 +71,9 @@ public class ManifoldSectionCompiler extends SectionCompiler {
                 BufferBuilder bufferBuilder = ((SectionCompilerAccessor) this).manifold$getOrBeginLayer(map, sectionBufferBuilderPack, renderType);
                 poseStack.pushPose();
                 poseStack.translate(
-                        (float)SectionPos.sectionRelative(blockPos3.getX()),
-                        (float)SectionPos.sectionRelative(blockPos3.getY()),
-                        (float)SectionPos.sectionRelative(blockPos3.getZ())
+                        (float) SectionPos.sectionRelative(blockPos3.getX()),
+                        (float) SectionPos.sectionRelative(blockPos3.getY()),
+                        (float) SectionPos.sectionRelative(blockPos3.getZ())
                 );
                 ((SectionCompilerAccessor) this).manifold$getBlockRenderer().renderBatched(blockState, blockPos3, renderChunkRegion, poseStack, bufferBuilder, true, randomSource);
                 poseStack.popPose();
@@ -81,8 +81,8 @@ public class ManifoldSectionCompiler extends SectionCompiler {
         }
 
         for (Map.Entry<RenderType, BufferBuilder> entry : map.entrySet()) {
-            RenderType renderType2 = (RenderType)entry.getKey();
-            MeshData meshData = ((BufferBuilder)entry.getValue()).build();
+            RenderType renderType2 = entry.getKey();
+            MeshData meshData = entry.getValue().build();
             if (meshData != null) {
                 if (renderType2 == RenderType.translucent()) {
                     results.transparencyState = meshData.sortQuads(sectionBufferBuilderPack.buffer(RenderType.translucent()), vertexSorting);

@@ -8,7 +8,6 @@ import dev.manifold.Manifold;
 import net.minecraft.ChatFormatting;
 import net.minecraft.commands.CommandBuildContext;
 import net.minecraft.commands.CommandSourceStack;
-import net.minecraft.commands.Commands;
 import net.minecraft.commands.arguments.UuidArgument;
 import net.minecraft.commands.arguments.blocks.BlockStateArgument;
 import net.minecraft.commands.arguments.coordinates.Vec3Argument;
@@ -30,7 +29,7 @@ import static net.minecraft.commands.Commands.argument;
 import static net.minecraft.commands.Commands.literal;
 
 public class ManifoldCommands {
-    public static void register(CommandDispatcher<CommandSourceStack> dispatcher, CommandBuildContext context, Commands.CommandSelection environment) {
+    public static void register(CommandDispatcher<CommandSourceStack> dispatcher, CommandBuildContext context) {
         dispatcher.register(
                 literal("manifold")
                         .requires(source -> source.hasPermission(2))
@@ -91,6 +90,7 @@ public class ManifoldCommands {
                                                         construct.getSimOrigin().getZ());
 
                                                 // Log to console
+                                                //noinspection LoggingPlaceholderCountMatchesArgumentCount
                                                 Manifold.LOGGER.debug("UUID: %s, Position: %s%n", id, posStr);
 
                                                 // Create clickable components
@@ -119,7 +119,6 @@ public class ManifoldCommands {
                                                 .then(argument("pos", Vec3Argument.vec3())
                                                         .executes(ctx -> {
                                                             CommandSourceStack source = ctx.getSource();
-                                                            ServerLevel level = source.getLevel();
                                                             ConstructManager manager = ConstructManager.INSTANCE;
 
                                                             if (manager == null) {
@@ -214,9 +213,6 @@ public class ManifoldCommands {
                                                                                             double z = DoubleArgumentType.getDouble(ctx, "z");
                                                                                             UUID uuid = UuidArgument.getUuid(ctx, "uuid");
 
-                                                                                            ServerPlayer player = ctx.getSource().getPlayerOrException();
-
-                                                                                            // You need a way to get the construct the player is targeting or owns
                                                                                             ConstructManager manager = ConstructManager.INSTANCE;
 
                                                                                             manager.addVelocity(uuid, new Vec3(x, y, z));
@@ -246,9 +242,7 @@ public class ManifoldCommands {
                                                                                             double z = DoubleArgumentType.getDouble(ctx, "z");
                                                                                             double w = DoubleArgumentType.getDouble(ctx, "w");
 
-                                                                                            ServerPlayer player = ctx.getSource().getPlayerOrException();
-
-                                                                                            ConstructManager.INSTANCE.setRotationalVelocity(uuid, new Quaternionf((float)x, (float)y, (float)z, (float)w));
+                                                                                            ConstructManager.INSTANCE.setRotationalVelocity(uuid, new Quaternionf((float) x, (float) y, (float) z, (float) w));
 
                                                                                             return 1;
                                                                                         })

@@ -22,13 +22,12 @@ import java.util.Optional;
 
 @Environment(EnvType.CLIENT)
 public class ManifoldRenderChunkRegion implements BlockAndTintGetter {
+    protected final Map<Long, ManifoldRenderChunk> chunks;
+    protected final Level level;
     private final int chunkCountX;
     private final int chunkCountZ;
     private final int minChunkX;
     private final int minChunkZ;
-    protected final Map<Long, ManifoldRenderChunk> chunks;
-
-    protected final Level level;
 
     public ManifoldRenderChunkRegion(Level level, int minChunkX, int minChunkZ, int chunkCountX, int chunkCountZ, Map<Long, ManifoldRenderChunk> chunks) {
         this.level = level;
@@ -37,6 +36,10 @@ public class ManifoldRenderChunkRegion implements BlockAndTintGetter {
         this.chunkCountX = chunkCountX;
         this.chunkCountZ = chunkCountZ;
         this.chunks = chunks;
+    }
+
+    public static long chunkPosToLong(int x, int z) {
+        return ((long) x & 0xFFFFFFFFL) | (((long) z & 0xFFFFFFFFL) << 32);
     }
 
     @Override
@@ -92,41 +95,13 @@ public class ManifoldRenderChunkRegion implements BlockAndTintGetter {
         int dx = chunkX - minChunkX;
         int dz = chunkZ - minChunkZ;
         if (dx < 0 || dx >= chunkCountX || dz < 0 || dz >= chunkCountZ) {
-            Manifold.LOGGER.warn("Chunk index out of bounds: " + chunkX + ", " + chunkZ);
+            Manifold.LOGGER.warn("Chunk index out of bounds: {}, {}", chunkX, chunkZ);
             return Optional.empty();
         }
         return Optional.of(chunks.get(chunkPosToLong(chunkX, chunkZ)));
     }
 
-    public int getChunkCountX() {
-        return this.chunkCountX;
-    }
-
-    public int getChunkCountZ() {
-        return this.chunkCountZ;
-    }
-
-    public int getMinChunkX() {
-        return this.minChunkX;
-    }
-
-    public int getMinChunkZ() {
-        return this.minChunkZ;
-    }
-
-    public int getMaxChunkX() {
-        return this.chunkCountX + this.minChunkX;
-    }
-
-    public int getMaxChunkZ() {
-        return this.chunkCountZ + this.minChunkZ;
-    }
-
     public Map<Long, ManifoldRenderChunk> getChunks() {
         return chunks;
-    }
-
-    public static long chunkPosToLong(int x, int z) {
-        return ((long)x & 0xFFFFFFFFL) | (((long)z & 0xFFFFFFFFL) << 32);
     }
 }

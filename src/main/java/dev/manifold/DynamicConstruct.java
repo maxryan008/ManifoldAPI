@@ -39,13 +39,10 @@ public class DynamicConstruct {
 
     // Unique ID for saving/syncing
     private final UUID id;
-
-    // The dimension it's rendered in
-    private ResourceKey<Level> world;
-
     // Physical origin in construct dimension
-    private BlockPos simOrigin;
-
+    private final BlockPos simOrigin;
+    // The dimension it's rendered in
+    private final ResourceKey<Level> world;
     // Bounding box around construct
     private BlockPos negativeBounds;
     private BlockPos positiveBounds;
@@ -107,6 +104,7 @@ public class DynamicConstruct {
     public BlockPos getPositiveBounds() {
         return this.positiveBounds;
     }
+
     public void setPositiveBounds(BlockPos positiveBounds) {
         this.positiveBounds = positiveBounds;
     }

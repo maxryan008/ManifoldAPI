@@ -1,9 +1,6 @@
 package dev.manifold.mixin;
 
-import dev.manifold.ConstructBlockHitResult;
-import dev.manifold.ConstructBreaker;
-import dev.manifold.ConstructManager;
-import dev.manifold.Manifold;
+import dev.manifold.*;
 import dev.manifold.network.packets.PickConstructBlockWithDataC2SPacket;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.client.Minecraft;
@@ -12,8 +9,6 @@ import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.world.InteractionHand;
-import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
@@ -44,9 +39,8 @@ public class MinecraftMixin {
 
         if (hit instanceof ConstructBlockHitResult constructHit) {
             BlockPos hitBlockPos = constructHit.getBlockPos();
-            Direction dir = constructHit.getDirection();
 
-            ConstructBreaker.getInstance().tick(client.player, constructHit.getConstruct().id(), hitBlockPos, dir);
+            ConstructBreaker.getInstance().tick(client.player, constructHit.getConstruct().id(), hitBlockPos);
         } else {
             // ✅ Not looking at a construct anymore, reset progress
             ConstructBreaker.getInstance().reset();
@@ -94,21 +88,7 @@ public class MinecraftMixin {
                 String string = BuiltInRegistries.BLOCK.getKey(simLevel.getBlockState(blockPos).getBlock()).toString();
                 Manifold.LOGGER.warn("Picking on: [Block] {} gave null item", string);
             } else {
-                Inventory inventory = player.getInventory();
-
-                int i = inventory.findSlotMatchingItem(itemStack);
-                if (bl) {
-                    inventory.setPickedItem(itemStack);
-                    assert minecraft.gameMode != null;
-                    minecraft.gameMode.handleCreativeModeItemAdd(player.getItemInHand(InteractionHand.MAIN_HAND), 36 + inventory.selected);
-                } else if (i != -1) {
-                    if (Inventory.isHotbarSlot(i)) {
-                        inventory.selected = i;
-                    } else {
-                        assert minecraft.gameMode != null;
-                        minecraft.gameMode.handlePickItem(i);
-                    }
-                }
+                ManifoldClient.handlePickItem(minecraft, player, bl, itemStack);
             }
 
             ci.cancel(); // Stop vanilla from running its version

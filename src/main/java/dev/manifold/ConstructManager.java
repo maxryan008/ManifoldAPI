@@ -26,11 +26,9 @@ import org.joml.Vector2i;
 import java.util.*;
 
 public class ConstructManager {
-    public static ConstructManager INSTANCE;
-
     private static final BlockPos REGION_CENTER = new BlockPos(256, 256, 256);
     private static final int REGION_SIZE = 512;
-
+    public static ConstructManager INSTANCE;
     private final ServerLevel simDimension;
     private final Map<UUID, DynamicConstruct> constructs = new HashMap<>();
     private final Map<Vector2i, UUID> regionOwners = new HashMap<>();

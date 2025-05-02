@@ -5,6 +5,12 @@ import com.mojang.serialization.codecs.RecordCodecBuilder;
 import org.joml.Quaternionf;
 
 public class QuaternionData {
+    public static final Codec<QuaternionData> CODEC = RecordCodecBuilder.create(instance -> instance.group(
+            Codec.FLOAT.fieldOf("x").forGetter(q -> q.x),
+            Codec.FLOAT.fieldOf("y").forGetter(q -> q.y),
+            Codec.FLOAT.fieldOf("z").forGetter(q -> q.z),
+            Codec.FLOAT.fieldOf("w").forGetter(q -> q.w)
+    ).apply(instance, QuaternionData::new));
     public final float x;
     public final float y;
     public final float z;
@@ -24,11 +30,4 @@ public class QuaternionData {
     public Quaternionf toQuaternionf() {
         return new Quaternionf(x, y, z, w);
     }
-
-    public static final Codec<QuaternionData> CODEC = RecordCodecBuilder.create(instance -> instance.group(
-            Codec.FLOAT.fieldOf("x").forGetter(q -> q.x),
-            Codec.FLOAT.fieldOf("y").forGetter(q -> q.y),
-            Codec.FLOAT.fieldOf("z").forGetter(q -> q.z),
-            Codec.FLOAT.fieldOf("w").forGetter(q -> q.w)
-    ).apply(instance, QuaternionData::new));
 }

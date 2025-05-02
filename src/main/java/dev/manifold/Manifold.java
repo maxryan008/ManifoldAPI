@@ -13,33 +13,33 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 public class Manifold implements ModInitializer {
-	public static final Logger LOGGER = LoggerFactory.getLogger(Constant.MOD_ID);
+    public static final Logger LOGGER = LoggerFactory.getLogger(Constant.MOD_ID);
 
-	@Override
-	public void onInitialize() {
-		LOGGER.info("Starting Main Initialization");
+    @Override
+    public void onInitialize() {
+        LOGGER.info("Starting Main Initialization");
 
-		ManifoldDimensions.register();
-		CommandRegistrationCallback.EVENT.register(ManifoldCommands::register);
-		ServerPacketRegistry.register();
-		ManifoldPackets.registerC2SPackets();
+        ManifoldDimensions.register();
+        CommandRegistrationCallback.EVENT.register((dispatcher, context, environment) -> ManifoldCommands.register(dispatcher, context));
+        ServerPacketRegistry.register();
+        ManifoldPackets.registerC2SPackets();
 
-		ServerLifecycleEvents.SERVER_STARTED.register(server -> {
-			ServerLevel simLevel = server.getLevel(ManifoldDimensions.SIM_WORLD);
-			if (simLevel == null) return;
+        ServerLifecycleEvents.SERVER_STARTED.register(server -> {
+            ServerLevel simLevel = server.getLevel(ManifoldDimensions.SIM_WORLD);
+            if (simLevel == null) return;
 
-			ConstructManager.INSTANCE = new ConstructManager(simLevel);
-			ConstructSaveData saveData = simLevel.getDataStorage().computeIfAbsent(
-					ConstructSaveData.FACTORY,
-					"manifold_constructs"
-			);
-			ConstructManager.INSTANCE.loadFromSave(saveData);
-		});
+            ConstructManager.INSTANCE = new ConstructManager(simLevel);
+            ConstructSaveData saveData = simLevel.getDataStorage().computeIfAbsent(
+                    ConstructSaveData.FACTORY,
+                    "manifold_constructs"
+            );
+            ConstructManager.INSTANCE.loadFromSave(saveData);
+        });
 
-		ServerTickEvents.END_SERVER_TICK.register(server -> {
-			if (ConstructManager.INSTANCE != null) {
-				ConstructManager.INSTANCE.tick(server);
-			}
-		});
-	}
+        ServerTickEvents.END_SERVER_TICK.register(server -> {
+            if (ConstructManager.INSTANCE != null) {
+                ConstructManager.INSTANCE.tick(server);
+            }
+        });
+    }
 }
