@@ -3,6 +3,7 @@
   "package": "dev.manifold.mixin",
   "compatibilityLevel": "JAVA_21",
   "mixins": [
+    "EntityMixin",
     "ServerLevelSaveMixin",
     "accessor.AbstractContainerMenuAccessor",
     "accessor.BlockBehaviourAccessor",

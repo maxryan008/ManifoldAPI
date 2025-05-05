@@ -2,6 +2,7 @@ package dev.manifold;
 
 import dev.manifold.network.packets.BreakInConstructC2SPacket;
 import dev.manifold.network.packets.ConstructSectionDataS2CPacket;
+import dev.manifold.phyics.collision.ConstructCollisionManager;
 import io.netty.buffer.Unpooled;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.core.BlockPos;
@@ -37,6 +38,10 @@ public class ConstructManager {
         this.simDimension = simDimension;
     }
 
+    private final ConstructCollisionManager collisionManager = new ConstructCollisionManager();
+
+    public ConstructCollisionManager getCollisionManager() { return collisionManager; }
+
     public void loadFromSave(ConstructSaveData saveData) {
         for (DynamicConstruct construct : saveData.getConstructs().values()) {
             constructs.put(construct.getId(), construct);
@@ -66,6 +71,7 @@ public class ConstructManager {
         if (construct != null) {
             clearConstructArea(construct);
             regionOwners.remove(getRegionIndex(construct.getSimOrigin()));
+            collisionManager.remove(id);
         }
     }
 
@@ -139,6 +145,9 @@ public class ConstructManager {
         BlockState oldState = simDimension.getBlockState(packet.blockHitPos());
         simDimension.setBlock(packet.blockHitPos(), Blocks.AIR.defaultBlockState(), 3);
         simDimension.levelEvent(2001, packet.blockHitPos(), Block.getId(oldState)); // Show break effect
+
+        BlockPos rel = packet.blockHitPos().subtract(construct.getSimOrigin());
+        this.expandBounds(packet.constructId(), rel);
     }
 
     public void expandBounds(UUID id, BlockPos rel) {
@@ -165,6 +174,8 @@ public class ConstructManager {
 
         construct.setNegativeBounds(new BlockPos(newNegX, newNegY, newNegZ));
         construct.setPositiveBounds(new BlockPos(newPosX, newPosY, newPosZ));
+
+        collisionManager.updateCollision(id, simDimension, construct.getSimOrigin(), construct.getNegativeBounds(), construct.getPositiveBounds());
     }
 
     public void tick(MinecraftServer server) {
@@ -245,7 +256,7 @@ public class ConstructManager {
         int radiusBlocks = chunkRadius * 16;
         return constructs.values().stream()
                 .filter(construct -> {
-                    AABB box = construct.getBoundingBox();
+                    AABB box = construct.getRenderBoundingBox();
                     return box.intersects(center.x - radiusBlocks, center.y - radiusBlocks, center.z - radiusBlocks,
                             center.x + radiusBlocks, center.y + radiusBlocks, center.z + radiusBlocks);
                 })

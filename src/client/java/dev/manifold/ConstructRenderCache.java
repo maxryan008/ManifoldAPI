@@ -144,7 +144,6 @@ public class ConstructRenderCache {
 
                 RenderSystem.enableDepthTest();
                 RenderSystem.enableBlend();
-                RenderSystem.disableCull(); // Optional
                 for (RenderType type : RenderType.chunkBufferLayers()) {
                     if (!compiled.isEmpty(type)) {
                         VertexBuffer buffer = section.section().getBuffer(type);
