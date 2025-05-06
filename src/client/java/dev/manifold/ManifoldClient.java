@@ -8,7 +8,7 @@ import io.netty.buffer.Unpooled;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
-import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
+import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientWorldEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderEvents;
 import net.minecraft.client.Camera;
@@ -147,12 +147,10 @@ public class ManifoldClient implements ClientModInitializer {
     public void onInitializeClient() {
         Manifold.LOGGER.info("Starting Client Initialization");
 
-        // Initialize renderer later once levelRenderer is non-null
-        ClientTickEvents.END_CLIENT_TICK.register(client -> {
-            if (renderer == null && client.level != null) {
-                renderer = new ConstructRenderCache();
-                Manifold.LOGGER.info("ConstructRenderCache initialized.");
-            }
+        // Reinitialize renderer whenever the level changes
+        ClientWorldEvents.AFTER_CLIENT_WORLD_CHANGE.register((client, world) -> {
+            renderer = new ConstructRenderCache();
+            Manifold.LOGGER.info("ConstructRenderCache initialized.");
         });
 
         // Register world rendering hook for sections
