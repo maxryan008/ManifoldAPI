@@ -154,10 +154,14 @@ public class DynamicConstruct {
         this.position = this.position.add(velocity);
 
         // Apply rotation from angular velocity (assuming quaternion rotation)
-        if (!angularVelocity.equals(new Quaternionf(0, 0, 0, 1))) {
+        if (!angularVelocity.equals(new Quaternionf(0, 0, 0, 1)) && !angularVelocity.equals(new Quaternionf(0, 0, 0, 0))) {
             this.rotation = new Quaternionf(this.angularVelocity).mul(this.rotation);
             this.rotation.normalize();
         }
 
+        //fallback
+        if (Float.isNaN(this.rotation.x)) {
+            this.rotation = new Quaternionf(0,0,0,1);
+        }
     }
 }
