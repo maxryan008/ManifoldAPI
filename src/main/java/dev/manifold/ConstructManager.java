@@ -46,6 +46,7 @@ public class ConstructManager {
         for (DynamicConstruct construct : saveData.getConstructs().values()) {
             constructs.put(construct.getId(), construct);
             regionOwners.put(getRegionIndex(construct.getSimOrigin()), construct.getId());
+            collisionManager.updateCollision(construct.getId(), simDimension, construct.getSimOrigin(), construct.getNegativeBounds(), construct.getPositiveBounds());
         }
     }
 
