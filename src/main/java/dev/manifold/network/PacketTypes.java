@@ -19,4 +19,7 @@ public class PacketTypes {
 
     public static final CustomPacketPayload.Type<PickConstructBlockWithDataS2CPacket> PICK_CONSTRUCT_BLOCK_S2C =
             new CustomPacketPayload.Type<>(Constant.id("pick_construct_block_response"));
+
+    public static final CustomPacketPayload.Type<RemoveConstructS2CPacket> REMOVE_CONSTRUCT =
+            new CustomPacketPayload.Type<>(Constant.id("remove_construct"));
 }

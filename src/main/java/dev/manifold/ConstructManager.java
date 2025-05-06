@@ -2,6 +2,7 @@ package dev.manifold;
 
 import dev.manifold.network.packets.BreakInConstructC2SPacket;
 import dev.manifold.network.packets.ConstructSectionDataS2CPacket;
+import dev.manifold.network.packets.RemoveConstructS2CPacket;
 import dev.manifold.phyics.collision.ConstructCollisionManager;
 import io.netty.buffer.Unpooled;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
@@ -75,6 +76,10 @@ public class ConstructManager {
             clearConstructArea(construct);
             regionOwners.remove(getRegionIndex(construct.getSimOrigin()));
             collisionManager.remove(id);
+
+            for (ServerPlayer player : simDimension.getServer().getPlayerList().getPlayers()) {
+                ServerPlayNetworking.send(player, new RemoveConstructS2CPacket(id));
+            }
         }
     }
 
@@ -131,6 +136,10 @@ public class ConstructManager {
 
     public Map<UUID, DynamicConstruct> getConstructs() {
         return constructs;
+    }
+
+    public boolean hasConstruct(UUID uuid) {
+        return constructs.containsKey(uuid);
     }
 
     public void placeBlockInConstruct(UUID uuid, BlockPos rel, BlockState state) {
