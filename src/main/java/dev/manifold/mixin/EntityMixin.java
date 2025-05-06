@@ -11,7 +11,8 @@ import org.spongepowered.asm.mixin.injection.At;
 
 @Mixin(Entity.class)
 public abstract class EntityMixin {
-    @Shadow public abstract AABB getBoundingBox();
+    @Shadow
+    public abstract AABB getBoundingBox();
 
     @ModifyReturnValue(
             method = "collide(Lnet/minecraft/world/phys/Vec3;)Lnet/minecraft/world/phys/Vec3;",

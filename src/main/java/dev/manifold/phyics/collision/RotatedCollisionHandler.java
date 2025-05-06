@@ -2,11 +2,9 @@ package dev.manifold.phyics.collision;
 
 import dev.manifold.ConstructManager;
 import dev.manifold.DynamicConstruct;
-import net.minecraft.core.Direction;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Matrix3f;
-import org.joml.Vector3f;
 
 import java.util.List;
 
@@ -29,6 +27,7 @@ public class RotatedCollisionHandler {
     }
 
     private static Vec3 collideWithConstruct(Vec3 movement, AABB worldBox, DynamicConstruct construct) {
+        Vec3 com = construct.getCenterOfMass();
         Vec3 constructPos = construct.getPosition();
         AABB localBox = worldBox.move(-constructPos.x, -constructPos.y, -constructPos.z);
         List<ConstructCollisionManager.CollisionEntry> entries =
@@ -45,7 +44,7 @@ public class RotatedCollisionHandler {
             do {
                 hadCorrection = false;
                 for (ConstructCollisionManager.CollisionEntry entry : entries) {
-                    OBB obb = OBB.fromAABB(entry.shapeBounds, new Matrix3f().rotate(construct.getRotation()));
+                    OBB obb = OBB.fromAABB(entry.shapeBounds.move(com.scale(-1)), new Matrix3f().rotate(construct.getRotation()));
                     if (OBBIntersectionHelper.AABBIntersectsOBB(movedBox, obb)) {
                         Vec3 correction = OBBIntersectionHelper.resolvePenetrationAABBtoOBB(movedBox, obb);
                         if (!correction.equals(Vec3.ZERO)) {
@@ -66,7 +65,7 @@ public class RotatedCollisionHandler {
             do {
                 hadCorrection = false;
                 for (ConstructCollisionManager.CollisionEntry entry : entries) {
-                    OBB obb = OBB.fromAABB(entry.shapeBounds, new Matrix3f().rotate(construct.getRotation()));
+                    OBB obb = OBB.fromAABB(entry.shapeBounds.move(com.scale(-1)), new Matrix3f().rotate(construct.getRotation()));
                     if (OBBIntersectionHelper.AABBIntersectsOBB(movedBox, obb)) {
                         Vec3 correction = OBBIntersectionHelper.resolvePenetrationAABBtoOBB(movedBox, obb);
                         if (!correction.equals(Vec3.ZERO)) {
@@ -87,7 +86,7 @@ public class RotatedCollisionHandler {
             do {
                 hadCorrection = false;
                 for (ConstructCollisionManager.CollisionEntry entry : entries) {
-                    OBB obb = OBB.fromAABB(entry.shapeBounds, new Matrix3f().rotate(construct.getRotation()));
+                    OBB obb = OBB.fromAABB(entry.shapeBounds.move(com.scale(-1)), new Matrix3f().rotate(construct.getRotation()));
                     if (OBBIntersectionHelper.AABBIntersectsOBB(movedBox, obb)) {
                         Vec3 correction = OBBIntersectionHelper.resolvePenetrationAABBtoOBB(movedBox, obb);
                         if (!correction.equals(Vec3.ZERO)) {

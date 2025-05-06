@@ -9,18 +9,6 @@ import net.minecraft.world.phys.shapes.VoxelShape;
 import java.util.*;
 
 public class ConstructCollisionManager {
-    public static class CollisionEntry {
-        public final VoxelShape shape;
-        public final AABB shapeBounds;
-        public final double friction;
-
-        public CollisionEntry(VoxelShape shape, AABB bounds, double friction) {
-            this.shape = shape;
-            this.shapeBounds = bounds;
-            this.friction = friction;
-        }
-    }
-
     private final Map<UUID, List<CollisionEntry>> shapesByConstruct = new HashMap<>();
 
     public void updateCollision(UUID id, Level level, BlockPos origin, BlockPos min, BlockPos max) {
@@ -48,5 +36,17 @@ public class ConstructCollisionManager {
 
     public List<CollisionEntry> getCollisionShapesWithFriction(UUID id) {
         return shapesByConstruct.getOrDefault(id, List.of());
+    }
+
+    public static class CollisionEntry {
+        public final VoxelShape shape;
+        public final AABB shapeBounds;
+        public final double friction;
+
+        public CollisionEntry(VoxelShape shape, AABB bounds, double friction) {
+            this.shape = shape;
+            this.shapeBounds = bounds;
+            this.friction = friction;
+        }
     }
 }

@@ -24,8 +24,10 @@ public class DynamicConstruct {
             Vec3.CODEC.fieldOf("position").forGetter(DynamicConstruct::getPosition),
             Vec3.CODEC.fieldOf("velocity").forGetter(DynamicConstruct::getVelocity),
             QuaternionData.CODEC.fieldOf("rotation").forGetter(dc -> new QuaternionData(dc.getRotation())),
-            QuaternionData.CODEC.fieldOf("angular_velocity").forGetter(dc -> new QuaternionData(dc.getAngularVelocity()))
-    ).apply(instance, (id, world, origin, neg, pos, posVec, vel, rot, angVel) -> {
+            QuaternionData.CODEC.fieldOf("angular_velocity").forGetter(dc -> new QuaternionData(dc.getAngularVelocity())),
+            Codec.INT.fieldOf("mass").forGetter(DynamicConstruct::getMass),
+            Vec3.CODEC.fieldOf("center_of_mass").forGetter(DynamicConstruct::getCenterOfMass)
+    ).apply(instance, (id, world, origin, neg, pos, posVec, vel, rot, angVel, mass, centerOfMass) -> {
         DynamicConstruct construct = new DynamicConstruct(id, world, origin);
         construct.setNegativeBounds(neg);
         construct.setPositiveBounds(pos);
@@ -33,6 +35,8 @@ public class DynamicConstruct {
         construct.setVelocity(vel);
         construct.setRotation(rot.toQuaternionf());
         construct.setAngularVelocity(angVel.toQuaternionf());
+        construct.setMass(mass);
+        construct.setCenterOfMass(centerOfMass);
         return construct;
     }));
 
@@ -54,6 +58,9 @@ public class DynamicConstruct {
     private Quaternionf rotation;
     private Quaternionf angularVelocity;
 
+    private int mass;
+    private Vec3 centerOfMass;
+
     public DynamicConstruct(UUID id, ResourceKey<Level> world, BlockPos simOrigin) {
         this.id = id;
         this.world = world;
@@ -67,6 +74,9 @@ public class DynamicConstruct {
 
         this.rotation = new Quaternionf(); // Identity rotation
         this.angularVelocity = new Quaternionf(); // No angular velocity
+
+        this.mass = 1000; //default for every single block at the moment will be 1 KG
+        this.centerOfMass = new Vec3(0.5, 0.5, 0.5);
     }
 
     public UUID getId() {
@@ -149,6 +159,30 @@ public class DynamicConstruct {
         this.angularVelocity = this.angularVelocity.mul(delta);
     }
 
+    public int getMass() {
+        return this.mass;
+    }
+
+    public void setMass(int mass) {
+        this.mass = mass;
+    }
+
+    public void addMass(int mass) {
+        this.mass += mass;
+    }
+
+    public void removeMass(int mass) {
+        this.mass -= mass;
+    }
+
+    public Vec3 getCenterOfMass() {
+        return centerOfMass;
+    }
+
+    public void setCenterOfMass(Vec3 centerOfMass) {
+        this.centerOfMass = centerOfMass;
+    }
+
     public void physicsTick() {
         // Apply velocity to position
         this.position = this.position.add(velocity);
@@ -161,7 +195,7 @@ public class DynamicConstruct {
 
         //fallback
         if (Float.isNaN(this.rotation.x)) {
-            this.rotation = new Quaternionf(0,0,0,1);
+            this.rotation = new Quaternionf(0, 0, 0, 1);
         }
     }
 }

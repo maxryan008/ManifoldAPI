@@ -110,16 +110,43 @@ public class ConstructRenderCache {
 
         Optional<Vec3> renderPositionOptional = ConstructManager.INSTANCE.getPosition(id);
         Optional<Quaternionf> renderRotationOptional = ConstructManager.INSTANCE.getRotation(id);
-        assert renderRotationOptional.isPresent();
-        if (renderPositionOptional.isPresent()) {
-            if (renderSections.containsKey(id)) {
-                renderSections.put(id, new CachedConstruct(id, origin, sectionList, renderSections.get(id).currentPosition, renderPositionOptional.get(), renderSections.get(id).currentRotation, renderRotationOptional.get()));
+        Optional<Vec3> centerOfMassOptional = ConstructManager.INSTANCE.getCenterOfMass(id);
+
+        if (renderPositionOptional.isPresent() && renderRotationOptional.isPresent() && centerOfMassOptional.isPresent()) {
+            Vec3 newPos = renderPositionOptional.get();
+            Quaternionf newRot = renderRotationOptional.get();
+            Vec3 newCOM = centerOfMassOptional.get();
+
+            CachedConstruct prev = renderSections.get(id);
+
+            if (prev != null) {
+                boolean comChanged = !prev.centerOfMass.equals(newCOM);
+
+                renderSections.put(id, new CachedConstruct(
+                        id,
+                        origin,
+                        sectionList,
+                        comChanged ? newPos : prev.currentPosition,
+                        newPos,
+                        prev.currentRotation,
+                        newRot,
+                        newCOM
+                ));
             } else {
-                renderSections.put(id, new CachedConstruct(id, origin, sectionList, renderPositionOptional.get(), renderPositionOptional.get(), renderRotationOptional.get(), renderRotationOptional.get()));
+                renderSections.put(id, new CachedConstruct(
+                        id,
+                        origin,
+                        sectionList,
+                        newPos,
+                        newPos,
+                        newRot,
+                        newRot,
+                        newCOM
+                ));
             }
+
+            ManifoldClient.lastServerUpdateTime = System.currentTimeMillis();
         }
-        // update global timer
-        ManifoldClient.lastServerUpdateTime = System.currentTimeMillis();
     }
 
     public void renderSections(PoseStack stack, Vec3 camPos, float deltaTicks) {
@@ -132,15 +159,19 @@ public class ConstructRenderCache {
             for (ManifoldRenderSection section : sectionArray) {
                 SectionRenderDispatcher.CompiledSection compiled = ((SectionRenderDispatcher_RenderSectionAccessor) section.section()).getCompiled().get();
 
-                Vec3 interpolatedPosition = cached.prevPosition.lerp(cached.currentPosition, deltaTicks);
-                Quaternionf interpolatedRotation = new Quaternionf(cached.prevRotation).slerp(cached.currentRotation, deltaTicks);
-                Vec3 sectionRenderPos = (Vec3.atLowerCornerOf(section.offset()));
-                stack.pushPose();
+                Vec3 interpolatedPos = cached.prevPosition.lerp(cached.currentPosition, deltaTicks);
+                Quaternionf interpolatedRot = new Quaternionf(cached.prevRotation).slerp(cached.currentRotation, deltaTicks);
+                Vec3 com = cached.centerOfMass;
+                Vec3 sectionPos = Vec3.atLowerCornerOf(section.offset());
 
+                stack.pushPose();
                 stack.mulPose(cameraInverseRot);
-                stack.translate(interpolatedPosition.x - camPos.x, interpolatedPosition.y - camPos.y, interpolatedPosition.z - camPos.z);
-                stack.mulPose(interpolatedRotation);
-                stack.translate(sectionRenderPos.x, sectionRenderPos.y, sectionRenderPos.z);
+
+                // Translate to world pos minus COM
+                stack.translate(interpolatedPos.x - camPos.x, interpolatedPos.y - camPos.y, interpolatedPos.z - camPos.z);
+                stack.mulPose(interpolatedRot);
+                stack.translate(sectionPos.x - com.x, sectionPos.y - com.y, sectionPos.z - com.z);
+
 
                 RenderSystem.enableDepthTest();
                 RenderSystem.enableBlend();
@@ -174,11 +205,12 @@ public class ConstructRenderCache {
             CachedConstruct cached = hitResult.getConstruct();
             Vec3 interpolatedPosition = cached.prevPosition.lerp(cached.currentPosition, deltaTicks);
             Quaternionf interpolatedRotation = new Quaternionf(cached.prevRotation).slerp(cached.currentRotation, deltaTicks);
+            Vec3 com = cached.centerOfMass;
             Vec3 blockOffset = Vec3.atLowerCornerOf(hitResult.getBlockPos().subtract(hitResult.getConstruct().origin));
 
             stack.translate(interpolatedPosition.x - camPos.x, interpolatedPosition.y - camPos.y, interpolatedPosition.z - camPos.z);
             stack.mulPose(interpolatedRotation);
-            stack.translate(blockOffset.x, blockOffset.y, blockOffset.z);
+            stack.translate(blockOffset.x - com.x, blockOffset.y - com.y, blockOffset.z - com.z);
 
             VertexConsumer consumer = Minecraft.getInstance().renderBuffers().bufferSource().getBuffer(RenderType.lines());
             renderShape(
@@ -206,6 +238,8 @@ public class ConstructRenderCache {
             Vec3 prevPosition,
             Vec3 currentPosition,
             Quaternionf prevRotation,
-            Quaternionf currentRotation
-    ) {}
+            Quaternionf currentRotation,
+            Vec3 centerOfMass
+    ) {
+    }
 }

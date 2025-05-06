@@ -31,4 +31,10 @@ public class OBB {
         Vec3 finalCenter = new Vec3(localCenter.x, localCenter.y, localCenter.z);
         return new OBB(finalCenter, new Vec3(halfX, halfY, halfZ), rotation);
     }
+
+    public OBB move(Vec3 origin) {
+        this.center = this.center.add(origin);
+        this.halfSize = this.halfSize.add(origin);
+        return this;
+    }
 }

@@ -23,6 +23,7 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Quaternionf;
 import org.joml.Vector2i;
+import org.joml.Vector3f;
 
 import java.util.*;
 
@@ -33,14 +34,15 @@ public class ConstructManager {
     private final ServerLevel simDimension;
     private final Map<UUID, DynamicConstruct> constructs = new HashMap<>();
     private final Map<Vector2i, UUID> regionOwners = new HashMap<>();
+    private final ConstructCollisionManager collisionManager = new ConstructCollisionManager();
 
     public ConstructManager(ServerLevel simDimension) {
         this.simDimension = simDimension;
     }
 
-    private final ConstructCollisionManager collisionManager = new ConstructCollisionManager();
-
-    public ConstructCollisionManager getCollisionManager() { return collisionManager; }
+    public ConstructCollisionManager getCollisionManager() {
+        return collisionManager;
+    }
 
     public void loadFromSave(ConstructSaveData saveData) {
         for (DynamicConstruct construct : saveData.getConstructs().values()) {
@@ -134,9 +136,30 @@ public class ConstructManager {
     public void placeBlockInConstruct(UUID uuid, BlockPos rel, BlockState state) {
         DynamicConstruct construct = constructs.get(uuid);
         if (construct == null) return;
+
         BlockPos absolute = construct.getSimOrigin().offset(rel);
         simDimension.setBlock(absolute, state, 3);
+
         this.expandBounds(uuid, rel);
+
+        // -- Mass and COM update --
+        Vec3 oldCOM = construct.getCenterOfMass();
+        int oldMass = construct.getMass();
+        int blockMass = 1000;
+
+        Vec3 newBlockCOM = new Vec3(rel.getX() + 0.5, rel.getY() + 0.5, rel.getZ() + 0.5);
+        Vec3 newCOM = oldCOM.scale(oldMass).add(newBlockCOM.scale(blockMass)).scale(1.0 / (oldMass + blockMass));
+
+        // Compute inverse-rotated COM delta to preserve world transform
+        Vec3 deltaCOM = newCOM.subtract(oldCOM);
+        Vector3f localShift = new Vector3f((float) deltaCOM.x, (float) deltaCOM.y, (float) deltaCOM.z);
+        localShift = localShift.rotate(construct.getRotation());
+
+        // Apply the position shift to compensate for pivot change
+        construct.setPosition(construct.getPosition().add(new Vec3(localShift)));
+
+        construct.setCenterOfMass(newCOM);
+        construct.setMass(oldMass + blockMass);
     }
 
     public void breakBlockInConstruct(BreakInConstructC2SPacket packet) {
@@ -149,6 +172,35 @@ public class ConstructManager {
 
         BlockPos rel = packet.blockHitPos().subtract(construct.getSimOrigin());
         this.expandBounds(packet.constructId(), rel);
+
+        // Only update COM if the block was actually removed
+        if (!oldState.isAir()) {
+            Vec3 removedCOM = new Vec3(rel.getX() + 0.5, rel.getY() + 0.5, rel.getZ() + 0.5);
+            Vec3 oldCOM = construct.getCenterOfMass();
+            int oldMass = construct.getMass();
+            int blockMass = 1000;
+
+            if (oldMass <= blockMass) {
+                removeConstruct(construct.getId());
+                return;
+            }
+
+            Vec3 newCOM = oldCOM.scale(oldMass)
+                    .subtract(removedCOM.scale(blockMass))
+                    .scale(1.0 / (oldMass - blockMass));
+
+            // Compute inverse-rotated COM delta to preserve world transform
+            Vec3 deltaCOM = newCOM.subtract(oldCOM);
+            Vector3f localShift = new Vector3f((float) deltaCOM.x, (float) deltaCOM.y, (float) deltaCOM.z);
+            localShift = localShift.rotate(construct.getRotation());
+
+            // Apply the position shift to compensate for pivot change
+            construct.setPosition(construct.getPosition().add(new Vec3(localShift)));
+
+            // Commit changes
+            construct.setCenterOfMass(newCOM);
+            construct.setMass(oldMass - blockMass);
+        }
     }
 
     public void expandBounds(UUID id, BlockPos rel) {
@@ -292,6 +344,15 @@ public class ConstructManager {
             return Optional.empty();
         } else {
             return Optional.of(construct.getRotation());
+        }
+    }
+
+    public Optional<Vec3> getCenterOfMass(UUID id) {
+        DynamicConstruct construct = this.constructs.get(id);
+        if (construct == null) {
+            return Optional.empty();
+        } else {
+            return Optional.of(construct.getCenterOfMass());
         }
     }
 

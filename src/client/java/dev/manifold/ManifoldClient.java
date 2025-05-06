@@ -85,13 +85,14 @@ public class ManifoldClient implements ClientModInitializer {
             Quaternionf interpolatedRotation = new Quaternionf(construct.prevRotation()).slerp(construct.currentRotation(), alpha);
             Quaternionf inverseInterpolatedRotation = new Quaternionf(interpolatedRotation).invert();
             BlockPos simOrigin = construct.origin();
+            Vec3 com = construct.centerOfMass();
 
             //Transform ray into construct-local space (un-rotated frame)
             Vec3 localStart = rotateVec(cameraPos.subtract(interpolatedConstructPosition), inverseInterpolatedRotation);
             Vec3 localEnd = rotateVec(rayEnd.subtract(interpolatedConstructPosition), inverseInterpolatedRotation);
 
-            localStart = localStart.add(interpolatedConstructPosition);
-            localEnd = localEnd.add(interpolatedConstructPosition);
+            localStart = localStart.add(interpolatedConstructPosition).add(com);
+            localEnd = localEnd.add(interpolatedConstructPosition).add(com);
 
             //Shift AABB to construct-local space
             AABB localAABB = ConstructManager.INSTANCE.getRenderAABB(construct.id());
@@ -108,7 +109,7 @@ public class ManifoldClient implements ClientModInitializer {
 
             if (localHitResult.getType() == HitResult.Type.BLOCK) {
                 Vec3 simHit = localHitResult.getLocation();
-                Vec3 localHit = simHit.subtract(Vec3.atLowerCornerOf(simOrigin));
+                Vec3 localHit = simHit.subtract(Vec3.atLowerCornerOf(simOrigin)).subtract(com);
                 Vec3 rotatedHit = rotateVec(localHit, interpolatedRotation);
                 Vec3 worldHitPos = rotatedHit.add(interpolatedConstructPosition);
                 double distSq = worldHitPos.distanceToSqr(cameraPos);

@@ -1,6 +1,5 @@
 package dev.manifold.phyics.collision;
 
-import net.minecraft.core.Direction;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Matrix3f;
@@ -34,7 +33,7 @@ public class OBBIntersectionHelper {
             }
         }
 
-        Vector3f t = new Vector3f((float)(b.center.x - a.center.x), (float)(b.center.y - a.center.y), (float)(b.center.z - a.center.z));
+        Vector3f t = new Vector3f((float) (b.center.x - a.center.x), (float) (b.center.y - a.center.y), (float) (b.center.z - a.center.z));
         Ra.transpose(new Matrix3f()).transform(t);
 
         for (int i = 0; i < 3; i++) {
@@ -72,7 +71,7 @@ public class OBBIntersectionHelper {
         double minOverlap = Double.POSITIVE_INFINITY;
         Vector3f bestAxis = null;
 
-        Vector3f t = new Vector3f((float)(obb.center.x - aobb.center.x), (float)(obb.center.y - aobb.center.y), (float)(obb.center.z - aobb.center.z));
+        Vector3f t = new Vector3f((float) (obb.center.x - aobb.center.x), (float) (obb.center.y - aobb.center.y), (float) (obb.center.z - aobb.center.z));
 
         for (Vector3f axis : axes) {
             if (axis.lengthSquared() < 1e-6f) continue;
