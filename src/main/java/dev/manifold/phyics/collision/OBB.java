@@ -3,6 +3,7 @@ package dev.manifold.phyics.collision;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Matrix3f;
+import org.joml.Vector3f;
 
 public class OBB {
     public Vec3 center;
@@ -24,6 +25,10 @@ public class OBB {
         double halfY = (box.maxY - box.minY) / 2.0;
         double halfZ = (box.maxZ - box.minZ) / 2.0;
 
-        return new OBB(new Vec3(centerX, centerY, centerZ), new Vec3(halfX, halfY, halfZ), rotation);
+        Vector3f localCenter = new Vector3f((float) centerX, (float) centerY, (float) centerZ);
+        rotation.transform(localCenter);
+
+        Vec3 finalCenter = new Vec3(localCenter.x, localCenter.y, localCenter.z);
+        return new OBB(finalCenter, new Vec3(halfX, halfY, halfZ), rotation);
     }
 }

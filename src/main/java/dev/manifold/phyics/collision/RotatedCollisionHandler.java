@@ -41,45 +41,63 @@ public class RotatedCollisionHandler {
         // --- X axis ---
         if (moveX != 0) {
             AABB movedBox = localBox.move(moveX, 0, 0);
-            for (ConstructCollisionManager.CollisionEntry entry : entries) {
-                OBB obb = OBB.fromAABB(entry.shapeBounds, new Matrix3f());
-                if (OBBIntersectionHelper.AABBIntersectsOBB(movedBox, obb)) {
-                    Vec3 correction = OBBIntersectionHelper.resolvePenetrationAABBtoOBB(movedBox, obb);
-                    moveX += correction.x;
-                    if (Math.signum(moveX) != Math.signum(movement.x)) moveX = 0;
-                    movedBox = movedBox.move(correction);
+            boolean hadCorrection;
+            do {
+                hadCorrection = false;
+                for (ConstructCollisionManager.CollisionEntry entry : entries) {
+                    OBB obb = OBB.fromAABB(entry.shapeBounds, new Matrix3f().rotate(construct.getRotation()));
+                    if (OBBIntersectionHelper.AABBIntersectsOBB(movedBox, obb)) {
+                        Vec3 correction = OBBIntersectionHelper.resolvePenetrationAABBtoOBB(movedBox, obb);
+                        if (!correction.equals(Vec3.ZERO)) {
+                            moveX += correction.x;
+                            movedBox = movedBox.move(correction);
+                            hadCorrection = true;
+                        }
+                    }
                 }
-            }
+            } while (hadCorrection && Math.signum(moveX) == Math.signum(movement.x));
             localBox = localBox.move(moveX, 0, 0);
         }
 
         // --- Y axis ---
         if (moveY != 0) {
             AABB movedBox = localBox.move(0, moveY, 0);
-            for (ConstructCollisionManager.CollisionEntry entry : entries) {
-                OBB obb = OBB.fromAABB(entry.shapeBounds, new Matrix3f());
-                if (OBBIntersectionHelper.AABBIntersectsOBB(movedBox, obb)) {
-                    Vec3 correction = OBBIntersectionHelper.resolvePenetrationAABBtoOBB(movedBox, obb);
-                    moveY += correction.y;
-                    if (Math.signum(moveY) != Math.signum(movement.y)) moveY = 0;
-                    movedBox = movedBox.move(correction);
+            boolean hadCorrection;
+            do {
+                hadCorrection = false;
+                for (ConstructCollisionManager.CollisionEntry entry : entries) {
+                    OBB obb = OBB.fromAABB(entry.shapeBounds, new Matrix3f().rotate(construct.getRotation()));
+                    if (OBBIntersectionHelper.AABBIntersectsOBB(movedBox, obb)) {
+                        Vec3 correction = OBBIntersectionHelper.resolvePenetrationAABBtoOBB(movedBox, obb);
+                        if (!correction.equals(Vec3.ZERO)) {
+                            moveY += correction.y;
+                            movedBox = movedBox.move(correction);
+                            hadCorrection = true;
+                        }
+                    }
                 }
-            }
+            } while (hadCorrection && Math.signum(moveY) == Math.signum(movement.y));
             localBox = localBox.move(0, moveY, 0);
         }
 
         // --- Z axis ---
         if (moveZ != 0) {
             AABB movedBox = localBox.move(0, 0, moveZ);
-            for (ConstructCollisionManager.CollisionEntry entry : entries) {
-                OBB obb = OBB.fromAABB(entry.shapeBounds, new Matrix3f());
-                if (OBBIntersectionHelper.AABBIntersectsOBB(movedBox, obb)) {
-                    Vec3 correction = OBBIntersectionHelper.resolvePenetrationAABBtoOBB(movedBox, obb);
-                    moveZ += correction.z;
-                    if (Math.signum(moveZ) != Math.signum(movement.z)) moveZ = 0;
-                    movedBox = movedBox.move(correction);
+            boolean hadCorrection;
+            do {
+                hadCorrection = false;
+                for (ConstructCollisionManager.CollisionEntry entry : entries) {
+                    OBB obb = OBB.fromAABB(entry.shapeBounds, new Matrix3f().rotate(construct.getRotation()));
+                    if (OBBIntersectionHelper.AABBIntersectsOBB(movedBox, obb)) {
+                        Vec3 correction = OBBIntersectionHelper.resolvePenetrationAABBtoOBB(movedBox, obb);
+                        if (!correction.equals(Vec3.ZERO)) {
+                            moveZ += correction.z;
+                            movedBox = movedBox.move(correction);
+                            hadCorrection = true;
+                        }
+                    }
                 }
-            }
+            } while (hadCorrection && Math.signum(moveX) == Math.signum(movement.x));
             localBox = localBox.move(0, 0, moveZ);
         }
 

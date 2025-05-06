@@ -54,26 +54,57 @@ public class OBBIntersectionHelper {
     }
 
     public static Vec3 resolvePenetrationAABBtoOBB(AABB aabb, OBB obb) {
-        // A simplified method that computes a minimum translation vector
-        Vec3 centerA = aabb.getCenter();
-        Vec3 halfA = new Vec3((aabb.maxX - aabb.minX) / 2, (aabb.maxY - aabb.minY) / 2, (aabb.maxZ - aabb.minZ) / 2);
-        Vec3 delta = centerA.subtract(obb.center);
+        Vec3 aCenter = aabb.getCenter();
+        Vec3 aHalf = new Vec3(
+                (aabb.maxX - aabb.minX) / 2,
+                (aabb.maxY - aabb.minY) / 2,
+                (aabb.maxZ - aabb.minZ) / 2
+        );
 
-        // Axis-aligned fallback for now: pick shallowest overlap axis
-        double xOverlap = halfA.x + obb.halfSize.x - Math.abs(delta.x);
-        double yOverlap = halfA.y + obb.halfSize.y - Math.abs(delta.y);
-        double zOverlap = halfA.z + obb.halfSize.z - Math.abs(delta.z);
+        OBB aobb = new OBB(aCenter, aHalf, new Matrix3f());
 
-        if (xOverlap <= 0 || yOverlap <= 0 || zOverlap <= 0) return Vec3.ZERO;
-
-        if (xOverlap < yOverlap && xOverlap < zOverlap) {
-            return new Vec3(xOverlap * Math.signum(delta.x), 0, 0);
-        } else if (yOverlap < zOverlap) {
-            return new Vec3(0, yOverlap * Math.signum(delta.y), 0);
-        } else {
-            return new Vec3(0, 0, zOverlap * Math.signum(delta.z));
+        Vector3f[] axes = new Vector3f[6];
+        for (int i = 0; i < 3; i++) {
+            axes[i] = aobb.rotation.getColumn(i, new Vector3f());
+            axes[i + 3] = obb.rotation.getColumn(i, new Vector3f());
         }
+
+        double minOverlap = Double.POSITIVE_INFINITY;
+        Vector3f bestAxis = null;
+
+        Vector3f t = new Vector3f((float)(obb.center.x - aobb.center.x), (float)(obb.center.y - aobb.center.y), (float)(obb.center.z - aobb.center.z));
+
+        for (Vector3f axis : axes) {
+            if (axis.lengthSquared() < 1e-6f) continue;
+
+            // Project half extents onto axis
+            float aProj = projectOBBExtent(aobb, axis);
+            float bProj = projectOBBExtent(obb, axis);
+            float centerDist = Math.abs(t.dot(axis));
+
+            float overlap = aProj + bProj - centerDist;
+            if (overlap <= 0) return Vec3.ZERO; // No collision
+
+            if (overlap < minOverlap) {
+                minOverlap = overlap;
+                bestAxis = new Vector3f(axis);
+            }
+        }
+
+        if (bestAxis == null) return Vec3.ZERO;
+
+        bestAxis.normalize();
+        float direction = Math.signum(t.dot(bestAxis));
+        return new Vec3(-bestAxis.x * minOverlap * direction, -bestAxis.y * minOverlap * direction, -bestAxis.z * minOverlap * direction);
     }
+
+    private static float projectOBBExtent(OBB obb, Vector3f axis) {
+        float projX = (float) obb.halfSize.x * Math.abs(axis.dot(obb.rotation.getColumn(0, new Vector3f())));
+        float projY = (float) obb.halfSize.y * Math.abs(axis.dot(obb.rotation.getColumn(1, new Vector3f())));
+        float projZ = (float) obb.halfSize.z * Math.abs(axis.dot(obb.rotation.getColumn(2, new Vector3f())));
+        return projX + projY + projZ;
+    }
+
 
     private static float get(Vec3 v, int axis) {
         return switch (axis) {
