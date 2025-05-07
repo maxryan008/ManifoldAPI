@@ -140,7 +140,7 @@ public class MassScreen extends Screen implements MenuAccess<AbstractContainerMe
         this.renderBackground(graphics, mouseX, mouseY, delta);
         graphics.drawString(this.font, "Mass Editor", this.width / 2 - 40, 2, 0xFFFFFF);
 
-        // 💡 Render all widgets first
+        // Render all widgets first
         super.render(graphics, mouseX, mouseY, delta);
 
         // Then render the scrollbar *after* everything else
@@ -207,8 +207,8 @@ public class MassScreen extends Screen implements MenuAccess<AbstractContainerMe
 
             ItemStack stack = new ItemStack(entry.item());
             this.massField = new EditBox(Minecraft.getInstance().font, x + 40, y, 60, 20, Component.literal("Mass"));
-            if (entry.mass().isPresent()) {
-                this.massField.setValue(String.valueOf(entry.mass().getAsDouble()));
+            if (true) { //todo fix up
+                this.massField.setValue(String.valueOf(entry.mass()));
             } else {
                 this.massField.setValue("1000");
             }

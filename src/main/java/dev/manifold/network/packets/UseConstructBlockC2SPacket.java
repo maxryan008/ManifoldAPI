@@ -113,7 +113,7 @@ public record UseConstructBlockC2SPacket(UUID constructId, BlockPos relPos, Inte
 
         BlockPos rel = hit.getBlockPos().relative(hit.getDirection()).subtract(origin);
 
-        BlockState state = block.defaultBlockState(); // Later you can improve with context (rotation, water logging etc.)
+        BlockState state = block.defaultBlockState(); // Later can improve with context (rotation, water logging etc.)
 
         ConstructManager.INSTANCE.placeBlockInConstruct(
                 id,

@@ -2,6 +2,7 @@ package dev.manifold.mass;
 
 import com.google.gson.*;
 import dev.manifold.Manifold;
+import dev.manifold.api.MassAPI;
 import dev.manifold.network.packets.MassGuiDataRefreshS2CPacket;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.core.Registry;
@@ -58,11 +59,11 @@ public class MassManager {
     }
 
     public static double getMassOrDefault(Item item) {
-        return getMass(item).orElse(DEFAULT_MASS);
+        return getMass(item).orElse(MassAPI.getDefaultMass(item));
     }
 
     public static boolean isOverridden(Item item) {
-        return overriddenMasses.containsKey(item);
+        return overriddenMasses.containsKey(item) || MassAPI.contains(item);
     }
 
     public static void save(MinecraftServer server) {
@@ -81,7 +82,7 @@ public class MassManager {
             }
         }
 
-        // ✅ Ensure parent directory exists
+        // Ensure parent directory exists
         File file = savePath.toFile();
         file.getParentFile().mkdirs(); // Creates config/manifold if needed
 
@@ -94,6 +95,9 @@ public class MassManager {
     }
 
     public static void load(MinecraftServer server) {
+        // Load external API-provided default masses
+        MassAPI.loadAllApiEntrypoints();
+
         overriddenMasses.clear();
         autoMasses.clear();
 
@@ -220,7 +224,7 @@ public class MassManager {
                         return total;
                     }));
 
-            preferredRecipe.map(r -> resolveRecipeMass(r, server)).ifPresent(mass -> overriddenMasses.put(item, mass.orElse(1000)));
+            preferredRecipe.map(r -> resolveRecipeMass(r, server)).ifPresent(mass -> overriddenMasses.put(item, mass.orElse(DEFAULT_MASS)));
         }
 
         optionalResponse.ifPresent(serverPlayer ->

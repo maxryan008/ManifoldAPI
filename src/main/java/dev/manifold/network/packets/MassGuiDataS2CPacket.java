@@ -1,9 +1,8 @@
 package dev.manifold.network.packets;
 
-import dev.manifold.mass.MassEntry;
 import dev.manifold.Constant;
+import dev.manifold.mass.MassEntry;
 import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.core.registries.Registries;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
@@ -24,9 +23,9 @@ public record MassGuiDataS2CPacket(List<MassEntry> entries) implements CustomPac
         buf.writeVarInt(packet.entries.size());
         for (MassEntry entry : packet.entries) {
             buf.writeById(BuiltInRegistries.ITEM::getId, entry.item());
-            buf.writeBoolean(entry.mass().isPresent());
-            if (entry.mass().isPresent()) {
-                buf.writeDouble(entry.mass().getAsDouble());
+            buf.writeBoolean(true); //todo fix up
+            if (true) {
+                buf.writeDouble(entry.mass());
             }
             buf.writeBoolean(entry.isOverridden());
         }
@@ -38,7 +37,7 @@ public record MassGuiDataS2CPacket(List<MassEntry> entries) implements CustomPac
         for (int i = 0; i < count; i++) {
             Item item = buf.readById(BuiltInRegistries.ITEM::byId);
             boolean hasMass = buf.readBoolean();
-            OptionalDouble mass = hasMass ? OptionalDouble.of(buf.readDouble()) : OptionalDouble.empty();
+            Double mass = buf.readDouble();
             boolean overridden = buf.readBoolean();
             entries.add(new MassEntry(item, mass, overridden));
         }

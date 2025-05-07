@@ -23,9 +23,9 @@ public record MassGuiDataRefreshS2CPacket(List<MassEntry> entries) implements Cu
         buf.writeVarInt(packet.entries.size());
         for (MassEntry entry : packet.entries) {
             buf.writeById(BuiltInRegistries.ITEM::getId, entry.item());
-            buf.writeBoolean(entry.mass().isPresent());
-            if (entry.mass().isPresent()) {
-                buf.writeDouble(entry.mass().getAsDouble());
+            buf.writeBoolean(true); //todo fix up
+            if (true) {
+                buf.writeDouble(entry.mass());
             }
             buf.writeBoolean(entry.isOverridden());
         }
@@ -37,7 +37,7 @@ public record MassGuiDataRefreshS2CPacket(List<MassEntry> entries) implements Cu
         for (int i = 0; i < count; i++) {
             Item item = buf.readById(BuiltInRegistries.ITEM::byId);
             boolean hasMass = buf.readBoolean();
-            OptionalDouble mass = hasMass ? OptionalDouble.of(buf.readDouble()) : OptionalDouble.empty();
+            Double mass = buf.readDouble();
             boolean overridden = buf.readBoolean();
             entries.add(new MassEntry(item, mass, overridden));
         }

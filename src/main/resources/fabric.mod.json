@@ -20,6 +20,9 @@
     ],
     "client": [
       "dev.manifold.ManifoldClient"
+    ],
+    "manifold:mass": [
+      "dev.manifold.api.MassAPI"
     ]
   },
   "mixins": [
