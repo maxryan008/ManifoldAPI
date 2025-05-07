@@ -75,7 +75,7 @@ public class DynamicConstruct {
         this.rotation = new Quaternionf(); // Identity rotation
         this.angularVelocity = new Quaternionf(); // No angular velocity
 
-        this.mass = 1000; //default for every single block at the moment will be 1 KG
+        this.mass = 1000; //todo default for every single block at the moment will be 1000 KG
         this.centerOfMass = new Vec3(0.5, 0.5, 0.5);
     }
 

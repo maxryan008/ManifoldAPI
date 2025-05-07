@@ -30,5 +30,25 @@ public class ServerPacketRegistry {
                 PacketTypes.PICK_CONSTRUCT_BLOCK_C2S,
                 PickConstructBlockWithDataC2SPacket.CODEC
         );
+
+        PayloadTypeRegistry.playC2S().register(
+                PacketTypes.MASS_RELOAD,
+                MassReloadC2SPacket.CODEC
+        );
+
+        PayloadTypeRegistry.playC2S().register(
+                PacketTypes.MASS_UPDATE,
+                MassUpdateC2SPacket.CODEC
+        );
+
+        PayloadTypeRegistry.playS2C().register(
+                PacketTypes.MASS_GUI_DATA,
+                MassGuiDataS2CPacket.CODEC
+        );
+
+        PayloadTypeRegistry.playS2C().register(
+                PacketTypes.MASS_GUI_DATA_REFRESH,
+                MassGuiDataRefreshS2CPacket.CODEC
+        );
     }
 }

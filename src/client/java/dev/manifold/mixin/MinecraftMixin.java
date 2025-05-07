@@ -41,7 +41,7 @@ public class MinecraftMixin {
 
             ConstructBreaker.getInstance().tick(client.player, constructHit.getConstruct().id(), hitBlockPos);
         } else {
-            // ✅ Not looking at a construct anymore, reset progress
+            // Not looking at a construct anymore, reset progress
             ConstructBreaker.getInstance().reset();
         }
     }

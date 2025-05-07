@@ -1,6 +1,9 @@
 package dev.manifold;
 
+import dev.manifold.gui.MassScreen;
 import dev.manifold.network.packets.ConstructSectionDataS2CPacket;
+import dev.manifold.network.packets.MassGuiDataRefreshS2CPacket;
+import dev.manifold.network.packets.MassGuiDataS2CPacket;
 import dev.manifold.network.packets.PickConstructBlockWithDataS2CPacket;
 import dev.manifold.render.ManifoldRenderChunk;
 import dev.manifold.render.ManifoldRenderChunkRegion;
@@ -180,6 +183,20 @@ public class ManifoldClient implements ClientModInitializer {
 
         ClientPlayNetworking.registerGlobalReceiver(PickConstructBlockWithDataS2CPacket.TYPE, (packet, context) ->
                 context.client().execute(() -> handlePickConstructData(packet))
+        );
+
+        ClientPlayNetworking.registerGlobalReceiver(MassGuiDataS2CPacket.TYPE, (packet, context) ->
+                context.client().execute(() -> {
+                    Minecraft.getInstance().setScreen(new MassScreen(packet.entries()));
+                })
+        );
+
+        ClientPlayNetworking.registerGlobalReceiver(MassGuiDataRefreshS2CPacket.TYPE, (packet, context) ->
+                context.client().execute(() -> {
+                    if (Minecraft.getInstance().screen instanceof MassScreen screen) {
+                        screen.refreshEntries(packet.entries());
+                    }
+                })
         );
     }
 

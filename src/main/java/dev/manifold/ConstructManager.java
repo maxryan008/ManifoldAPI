@@ -145,7 +145,7 @@ public class ConstructManager {
         // -- Mass and COM update --
         Vec3 oldCOM = construct.getCenterOfMass();
         int oldMass = construct.getMass();
-        int blockMass = 1000;
+        int blockMass = 1000; //todo make each block mass differant per block
 
         Vec3 newBlockCOM = new Vec3(rel.getX() + 0.5, rel.getY() + 0.5, rel.getZ() + 0.5);
         Vec3 newCOM = oldCOM.scale(oldMass).add(newBlockCOM.scale(blockMass)).scale(1.0 / (oldMass + blockMass));
@@ -178,7 +178,7 @@ public class ConstructManager {
             Vec3 removedCOM = new Vec3(rel.getX() + 0.5, rel.getY() + 0.5, rel.getZ() + 0.5);
             Vec3 oldCOM = construct.getCenterOfMass();
             int oldMass = construct.getMass();
-            int blockMass = 1000;
+            int blockMass = 1000; //todo make each block mass differant per block
 
             if (oldMass <= blockMass) {
                 removeConstruct(construct.getId());

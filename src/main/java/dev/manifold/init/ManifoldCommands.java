@@ -5,9 +5,11 @@ import com.mojang.brigadier.arguments.DoubleArgumentType;
 import dev.manifold.ConstructManager;
 import dev.manifold.DynamicConstruct;
 import dev.manifold.Manifold;
+import dev.manifold.gui.MassScreenHandler;
 import net.minecraft.ChatFormatting;
 import net.minecraft.commands.CommandBuildContext;
 import net.minecraft.commands.CommandSourceStack;
+import net.minecraft.commands.Commands;
 import net.minecraft.commands.arguments.UuidArgument;
 import net.minecraft.commands.arguments.blocks.BlockStateArgument;
 import net.minecraft.commands.arguments.coordinates.Vec3Argument;
@@ -253,6 +255,15 @@ public class ManifoldCommands {
                                                 )
                                         )
                                 )
+                        )
+
+                        // --- /manifold masses ---
+                        .then(literal("masses")
+                                .executes(ctx -> {
+                                    ServerPlayer player = ctx.getSource().getPlayerOrException();
+                                    MassScreenHandler.open(player);
+                                    return 1;
+                                })
                         )
         );
     }
