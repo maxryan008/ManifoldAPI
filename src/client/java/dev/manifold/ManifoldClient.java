@@ -1,10 +1,8 @@
 package dev.manifold;
 
 import dev.manifold.gui.MassScreen;
-import dev.manifold.network.packets.ConstructSectionDataS2CPacket;
-import dev.manifold.network.packets.MassGuiDataRefreshS2CPacket;
-import dev.manifold.network.packets.MassGuiDataS2CPacket;
-import dev.manifold.network.packets.PickConstructBlockWithDataS2CPacket;
+import dev.manifold.mass.MassManager;
+import dev.manifold.network.packets.*;
 import dev.manifold.render.ManifoldRenderChunk;
 import dev.manifold.render.ManifoldRenderChunkRegion;
 import io.netty.buffer.Unpooled;
@@ -12,8 +10,10 @@ import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientWorldEvents;
+import net.fabricmc.fabric.api.client.item.v1.ItemTooltipCallback;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderEvents;
+import net.minecraft.ChatFormatting;
 import net.minecraft.client.Camera;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
@@ -22,11 +22,14 @@ import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.chat.Component;
 import net.minecraft.util.Mth;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.TooltipFlag;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.Level;
@@ -41,6 +44,7 @@ import net.minecraft.world.phys.shapes.VoxelShape;
 import org.jetbrains.annotations.Nullable;
 import org.joml.Quaternionf;
 import org.joml.Vector3f;
+import org.w3c.dom.Text;
 
 import java.util.*;
 
@@ -207,6 +211,20 @@ public class ManifoldClient implements ClientModInitializer {
                     }
                 })
         );
+
+        ItemTooltipCallback.EVENT.register((ItemStack stack, Item.TooltipContext context, TooltipFlag type, List<Component> lines) -> {
+            if (type.isAdvanced()) {
+                MassManager.getMass(stack.getItem()).ifPresentOrElse(mass -> {
+                    lines.add(1, Component.literal("Mass: " + mass + " kg")
+                            .withStyle(style -> style.withColor(ChatFormatting.DARK_GRAY))
+                    );
+                }, () -> {
+                    lines.add(1, Component.literal("Mass: 1000 kg")
+                            .withStyle(style -> style.withColor(ChatFormatting.DARK_GRAY))
+                    );
+                });
+            }
+        });
     }
 
     private void handlePickConstructData(PickConstructBlockWithDataS2CPacket packet) {

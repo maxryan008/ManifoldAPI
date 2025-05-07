@@ -250,7 +250,7 @@ public class MassScreen extends Screen implements MenuAccess<AbstractContainerMe
             graphics.renderItemDecorations(mc.font, stack, this.getX(), this.getY());
 
             // Set mass color
-            int color = 0xFFFFFF;
+            int color;
             String mode;
             if (MassManager.isBase(entry.item(), server)) {
                 if (!MassManager.isOverridden(entry.item())) {
@@ -264,13 +264,14 @@ public class MassScreen extends Screen implements MenuAccess<AbstractContainerMe
             } else {
                 mode = MassManager.isAuto(entry.item()) ? "Auto" : "Manual";
                 color = MassManager.isAuto(entry.item()) ? 0xFF00FF00 : 0xFF0000FF;
-            }
-
-            if (!((mode.equals("Auto") && autoEnabled) || (mode.equals("Manual") && !autoEnabled))) {
-                if (autoEnabled) {
-                    mode = "Auto";
-                } else {
-                    mode = "Manual";
+                if (!((mode.equals("Auto") && autoEnabled) || (mode.equals("Manual") && !autoEnabled))) {
+                    if (autoEnabled) {
+                        mode = "Auto";
+                        color = 0xFF00FF00;
+                    } else {
+                        mode = "Manual";
+                        color = 0xFF0000FF;
+                    }
                 }
             }
 
