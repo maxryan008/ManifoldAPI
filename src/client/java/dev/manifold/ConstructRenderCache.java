@@ -36,6 +36,7 @@ public class ConstructRenderCache {
     private final ManifoldSectionCompiler compiler = new ManifoldSectionCompiler(MC.getBlockRenderer(), MC.getBlockEntityRenderDispatcher());
     private final RenderBuffers buffers = MC.renderBuffers();
     private final HashMap<UUID, CachedConstruct> renderSections = new HashMap<>();
+    private final ArrayList<UUID> markedForRemoval = new ArrayList<>();
 
     private static void renderShape(
             PoseStack poseStack, VertexConsumer vertexConsumer, VoxelShape voxelShape, double d, double e, double f, float r, float g, float b, float a
@@ -152,6 +153,11 @@ public class ConstructRenderCache {
     public void renderSections(PoseStack stack, Vec3 camPos, float deltaTicks) {
         Quaternionf cameraRot = Minecraft.getInstance().gameRenderer.getMainCamera().rotation();
         Quaternionf cameraInverseRot = cameraRot.invert();
+
+        if (!markedForRemoval.isEmpty()) {
+            renderSections.keySet().removeAll(markedForRemoval);
+            markedForRemoval.clear();
+        }
         Collection<CachedConstruct> constructs = renderSections.values();
 
         for (CachedConstruct cached : constructs) {
@@ -212,7 +218,7 @@ public class ConstructRenderCache {
             stack.mulPose(interpolatedRotation);
             stack.translate(blockOffset.x - com.x, blockOffset.y - com.y, blockOffset.z - com.z);
 
-            VertexConsumer consumer = Minecraft.getInstance().renderBuffers().bufferSource().getBuffer(RenderType.lines());
+            VertexConsumer consumer = MC.renderBuffers().bufferSource().getBuffer(RenderType.lines());
             renderShape(
                     stack,
                     consumer,
@@ -221,7 +227,7 @@ public class ConstructRenderCache {
                     1.0F, 0.0F, 0.0F, 1.0F
             );
 
-            Minecraft.getInstance().renderBuffers().outlineBufferSource().endOutlineBatch();
+            MC.renderBuffers().outlineBufferSource().endOutlineBatch();
         }
 
         stack.popPose();
@@ -229,6 +235,10 @@ public class ConstructRenderCache {
 
     public HashMap<UUID, CachedConstruct> getRenderedConstructs() {
         return this.renderSections;
+    }
+
+    public void markForRemoval(UUID uuid) {
+        this.markedForRemoval.add(uuid);
     }
 
     public record CachedConstruct(

@@ -16,6 +16,11 @@ public class ServerPacketRegistry {
                 PickConstructBlockWithDataS2CPacket.CODEC
         );
 
+        PayloadTypeRegistry.playS2C().register(
+                PacketTypes.REMOVE_CONSTRUCT,
+                RemoveConstructS2CPacket.CODEC
+        );
+
         PayloadTypeRegistry.playC2S().register(
                 PacketTypes.BREAK_IN_CONSTRUCT,
                 BreakInConstructC2SPacket.CODEC

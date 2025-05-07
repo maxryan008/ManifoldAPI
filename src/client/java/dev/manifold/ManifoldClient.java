@@ -83,31 +83,36 @@ public class ManifoldClient implements ClientModInitializer {
         double closestDistSq = maxDistance * maxDistance;
 
         for (ConstructRenderCache.CachedConstruct construct : renderer.getRenderedConstructs().values()) {
-            //Compute inverse rotation and position
+            UUID uuid = construct.id();
+
+            // Skip constructs that have been removed to prevent a crash
+            if (!ConstructManager.INSTANCE.hasConstruct(uuid)) continue;
+
+            // Compute inverse rotation and position
             Vec3 interpolatedConstructPosition = construct.prevPosition().lerp(construct.currentPosition(), alpha);
             Quaternionf interpolatedRotation = new Quaternionf(construct.prevRotation()).slerp(construct.currentRotation(), alpha);
             Quaternionf inverseInterpolatedRotation = new Quaternionf(interpolatedRotation).invert();
             BlockPos simOrigin = construct.origin();
             Vec3 com = construct.centerOfMass();
 
-            //Transform ray into construct-local space (un-rotated frame)
+            // Transform ray into construct-local space (un-rotated frame)
             Vec3 localStart = rotateVec(cameraPos.subtract(interpolatedConstructPosition), inverseInterpolatedRotation);
             Vec3 localEnd = rotateVec(rayEnd.subtract(interpolatedConstructPosition), inverseInterpolatedRotation);
 
             localStart = localStart.add(interpolatedConstructPosition).add(com);
             localEnd = localEnd.add(interpolatedConstructPosition).add(com);
 
-            //Shift AABB to construct-local space
-            AABB localAABB = ConstructManager.INSTANCE.getRenderAABB(construct.id());
+            // Shift AABB to construct-local space
+            AABB localAABB = ConstructManager.INSTANCE.getRenderAABB(uuid);
 
-            //Perform early rejection (stay in local space!)
+            // Perform early rejection (stay in local space!)
             if (!localAABB.contains(localStart) && localAABB.clip(localStart, localEnd).isEmpty()) continue;
 
-            //Transform ray back into sim-dimension world space
+            // Transform ray back into sim-dimension world space
             Vec3 simStart = localStart.add(Vec3.atLowerCornerOf(simOrigin)).subtract(interpolatedConstructPosition);
             Vec3 simEnd = localEnd.add(Vec3.atLowerCornerOf(simOrigin)).subtract(interpolatedConstructPosition);
 
-            //Perform real sim-dimension raycast
+            // Perform real sim-dimension raycast
             BlockHitResult localHitResult = raycastIntoConstructDimension(simStart, simEnd, player, simLevel);
 
             if (localHitResult.getType() == HitResult.Type.BLOCK) {
@@ -120,7 +125,7 @@ public class ManifoldClient implements ClientModInitializer {
                     closestDistSq = distSq;
                     BlockState state = simLevel.getBlockState(localHitResult.getBlockPos());
                     VoxelShape shape = state.getShape(simLevel, localHitResult.getBlockPos());
-                    ManifoldRenderChunkRegion region = regions.get(construct.id());
+                    ManifoldRenderChunkRegion region = regions.get(uuid);
                     closestHit = new ConstructBlockHitResult(construct, shape, localHitResult, region);
                 }
             }
@@ -183,6 +188,10 @@ public class ManifoldClient implements ClientModInitializer {
 
         ClientPlayNetworking.registerGlobalReceiver(PickConstructBlockWithDataS2CPacket.TYPE, (packet, context) ->
                 context.client().execute(() -> handlePickConstructData(packet))
+        );
+
+        ClientPlayNetworking.registerGlobalReceiver(RemoveConstructS2CPacket.TYPE, (packet, context) ->
+                context.client().execute(() -> handleRemoveConstruct(packet))
         );
 
         ClientPlayNetworking.registerGlobalReceiver(MassGuiDataS2CPacket.TYPE, (packet, context) ->
@@ -260,5 +269,9 @@ public class ManifoldClient implements ClientModInitializer {
         regions.put(packet.constructId(), region);
 
         renderer.uploadMesh(packet.constructId(), packet.origin(), region);
+    }
+
+    private void handleRemoveConstruct(RemoveConstructS2CPacket packet) {
+        renderer.markForRemoval(packet.constructId());
     }
 }

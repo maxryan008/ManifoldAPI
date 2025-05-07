@@ -20,6 +20,9 @@ public class PacketTypes {
     public static final CustomPacketPayload.Type<PickConstructBlockWithDataS2CPacket> PICK_CONSTRUCT_BLOCK_S2C =
             new CustomPacketPayload.Type<>(Constant.id("pick_construct_block_response"));
 
+    public static final CustomPacketPayload.Type<RemoveConstructS2CPacket> REMOVE_CONSTRUCT =
+            new CustomPacketPayload.Type<>(Constant.id("remove_construct"));
+
     public static final CustomPacketPayload.Type<MassGuiDataS2CPacket> MASS_GUI_DATA =
             new CustomPacketPayload.Type<>(Constant.id("mass_gui_data"));
 
@@ -31,4 +34,4 @@ public class PacketTypes {
 
     public static final CustomPacketPayload.Type<MassUpdateC2SPacket> MASS_UPDATE =
             new CustomPacketPayload.Type<>(Constant.id("mass_update"));
-}
+    }
