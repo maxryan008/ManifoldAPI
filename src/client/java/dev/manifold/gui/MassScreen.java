@@ -207,11 +207,7 @@ public class MassScreen extends Screen implements MenuAccess<AbstractContainerMe
 
             ItemStack stack = new ItemStack(entry.item());
             this.massField = new EditBox(Minecraft.getInstance().font, x + 40, y, 60, 20, Component.literal("Mass"));
-            if (true) { //todo fix up
-                this.massField.setValue(String.valueOf(entry.mass()));
-            } else {
-                this.massField.setValue("1000");
-            }
+            this.massField.setValue(String.valueOf(entry.mass()));
 
             this.setButton = Button.builder(Component.literal("Set"), b -> {
                 try {
@@ -294,9 +290,7 @@ public class MassScreen extends Screen implements MenuAccess<AbstractContainerMe
         }
 
         @Override
-        protected void updateWidgetNarration(NarrationElementOutput narrationElementOutput) {
-            //todo not sure what this one does
-        }
+        protected void updateWidgetNarration(NarrationElementOutput narrationElementOutput) {}
 
         private boolean isHovered(int mouseX, int mouseY, Button button) {
             return mouseX >= button.getX() && mouseY >= button.getY()

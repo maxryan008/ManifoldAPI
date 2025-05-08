@@ -213,15 +213,10 @@ public class ManifoldClient implements ClientModInitializer {
 
         ItemTooltipCallback.EVENT.register((ItemStack stack, Item.TooltipContext context, TooltipFlag type, List<Component> lines) -> {
             if (type.isAdvanced()) {
-                MassManager.getMass(stack.getItem()).ifPresentOrElse(mass -> {
-                    lines.add(1, Component.literal("Mass: " + mass + " kg")
-                            .withStyle(style -> style.withColor(ChatFormatting.DARK_GRAY))
-                    );
-                }, () -> {
-                    lines.add(1, Component.literal("Mass: 1000 kg")
-                            .withStyle(style -> style.withColor(ChatFormatting.DARK_GRAY))
-                    );
-                });
+                double mass = MassManager.getMassOrDefault(stack.getItem());
+                lines.add(1, Component.literal("Mass: " + (int) mass + " kg")
+                        .withStyle(style -> style.withColor(ChatFormatting.DARK_GRAY))
+                );
             }
         });
     }

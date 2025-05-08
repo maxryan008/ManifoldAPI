@@ -11,7 +11,6 @@ import org.jetbrains.annotations.NotNull;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.OptionalDouble;
 
 public record MassGuiDataS2CPacket(List<MassEntry> entries) implements CustomPacketPayload {
     public static final Type<MassGuiDataS2CPacket> TYPE = new Type<>(Constant.id("mass_gui_data"));
@@ -23,10 +22,7 @@ public record MassGuiDataS2CPacket(List<MassEntry> entries) implements CustomPac
         buf.writeVarInt(packet.entries.size());
         for (MassEntry entry : packet.entries) {
             buf.writeById(BuiltInRegistries.ITEM::getId, entry.item());
-            buf.writeBoolean(true); //todo fix up
-            if (true) {
-                buf.writeDouble(entry.mass());
-            }
+            buf.writeDouble(entry.mass());
             buf.writeBoolean(entry.isOverridden());
         }
     }
@@ -36,7 +32,6 @@ public record MassGuiDataS2CPacket(List<MassEntry> entries) implements CustomPac
         List<MassEntry> entries = new ArrayList<>();
         for (int i = 0; i < count; i++) {
             Item item = buf.readById(BuiltInRegistries.ITEM::byId);
-            boolean hasMass = buf.readBoolean();
             Double mass = buf.readDouble();
             boolean overridden = buf.readBoolean();
             entries.add(new MassEntry(item, mass, overridden));

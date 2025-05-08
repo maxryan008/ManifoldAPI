@@ -1,6 +1,7 @@
 package dev.manifold.mass;
 
 import com.google.gson.*;
+import dev.manifold.ConstructManager;
 import dev.manifold.Manifold;
 import dev.manifold.api.MassAPI;
 import dev.manifold.network.packets.MassGuiDataRefreshS2CPacket;
@@ -25,26 +26,30 @@ public class MassManager {
     private static final Set<Item> baseItems = new HashSet<>();
     private static final Set<Item> stemItems = new HashSet<>();
     private static final Set<Item> autoMasses = new HashSet<>();
+    private static final List<ChangedItem> changedItems = new ArrayList<>();
     private static final double DEFAULT_MASS = 1000.0;
     private static Path savePath;
+
+    public record ChangedItem(Item item, Double oldMass, Double newMass) {}
 
     public static void init(Path configDir) {
         savePath = configDir.resolve("mass_data.json");
     }
 
-    public static void setMass(Item item, double mass, boolean isAuto) {
-        overriddenMasses.put(item, mass);
+    public static void setMass(Item item, double newMass, boolean isAuto) {
+        double oldMass = getMassOrDefault(item);
+        if (oldMass != newMass) {
+            if (item instanceof BlockItem) {
+                changedItems.add(new ChangedItem(item, oldMass, newMass));
+            }
+        }
+        overriddenMasses.put(item, newMass);
         if (isAuto) autoMasses.add(item);
         else autoMasses.remove(item);
     }
 
     public static void setMass(Item item, double mass) {
         setMass(item, mass, false); // default to manual
-    }
-
-    public static void unsetMass(Item item) {
-        overriddenMasses.remove(item);
-        autoMasses.remove(item);
     }
 
     public static boolean isAuto(Item item) {
@@ -113,6 +118,9 @@ public class MassManager {
                         JsonElement val = entry.getValue();
                         if (val.isJsonObject()) {
                             JsonObject obj = val.getAsJsonObject();
+                            if (!obj.has("mass")) {
+                                System.out.println("test");
+                            }
                             double mass = obj.get("mass").getAsDouble();
                             boolean isAuto = obj.has("auto") && obj.get("auto").getAsBoolean();
                             setMass(item, mass, isAuto);
@@ -139,10 +147,10 @@ public class MassManager {
             }
         }
 
-        recalculateMasses(Optional.empty(),server);
+        recalculateMasses(server);
     }
 
-    public static void recalculateMasses(Optional<ServerPlayer> optionalResponse, MinecraftServer server) {
+    public static void recalculateMasses(MinecraftServer server) {
         Map<Item, Set<Item>> forwardGraph = new HashMap<>();
         Map<Item, List<CraftingRecipe>> outputRecipes = new HashMap<>();
         Registry<Item> itemRegistry = server.registryAccess().registryOrThrow(Registries.ITEM);
@@ -224,12 +232,25 @@ public class MassManager {
                         return total;
                     }));
 
-            preferredRecipe.map(r -> resolveRecipeMass(r, server)).ifPresent(mass -> overriddenMasses.put(item, mass.orElse(DEFAULT_MASS)));
+            preferredRecipe.map(r -> resolveRecipeMass(r, server)).ifPresent(mass -> {
+                double newMass = mass.orElse(DEFAULT_MASS);
+                double oldMass = getMassOrDefault(item);
+                if (oldMass != newMass) {
+                    if (item instanceof BlockItem) {
+                        changedItems.add(new ChangedItem(item, oldMass, newMass));
+                    }
+                }
+                overriddenMasses.put(item, newMass);
+            });
         }
 
-        optionalResponse.ifPresent(serverPlayer ->
-                ServerPlayNetworking.send(serverPlayer, new MassGuiDataRefreshS2CPacket(MassEntry.collect(server)))
-        );
+        allChangedItems(changedItems);
+        changedItems.clear();
+    }
+
+    public static void recalculateMasses(ServerPlayer response, MinecraftServer server) {
+        recalculateMasses(server);
+        ServerPlayNetworking.send(response, new MassGuiDataRefreshS2CPacket(MassEntry.collect(server)));
     }
 
     public static boolean isBase(Item item, MinecraftServer server) {
@@ -289,20 +310,16 @@ public class MassManager {
             sccVisited.addAll(scc); // mark all items in the SCC as globally visited
 
             boolean reachableFromBase = scc.stream().anyMatch(i ->
-                    baseItems.contains(i) || isReachableFromBase(i, forwardGraph, baseItems)
+                    baseItems.contains(i) || isReachableFromBase(i, forwardGraph)
             );
 
             if (reachableFromBase) {
                 autoMasses.add(scc.stream().toList().getLast());
             } else {
                 // Prefer block-like base
-                Item base = scc.stream()
-                        .sorted(Comparator
-                                .comparing((Item i) -> (i instanceof BlockItem) ? 0 : 1)
-                                .thenComparing(i -> itemRegistry.getKey(i).toString()))
-                        .findFirst()
-                        .orElse(null);
-                if (base != null) baseItems.add(base);
+                scc.stream().min(Comparator
+                        .comparing((Item i) -> (i instanceof BlockItem) ? 0 : 1)
+                        .thenComparing(i -> Objects.requireNonNull(itemRegistry.getKey(i)).toString())).ifPresent(baseItems::add);
             }
         }
 
@@ -387,7 +404,7 @@ public class MassManager {
         }
 
         if (total == 0) {
-            Manifold.LOGGER.error("No mass found for recipe " + recipe);
+            Manifold.LOGGER.error("No newMass found for recipe " + recipe);
             return OptionalDouble.empty();
         }
 
@@ -433,7 +450,7 @@ public class MassManager {
         return !recipes.isEmpty() && recipes.stream().allMatch(r -> isDyeRecipe(r, item, itemRegistry));
     }
 
-    private static boolean isReachableFromBase(Item item, Map<Item, Set<Item>> graph, Set<Item> baseItems) {
+    private static boolean isReachableFromBase(Item item, Map<Item, Set<Item>> graph) {
         Set<Item> visited = new HashSet<>();
         Deque<Item> stack = new ArrayDeque<>();
         stack.push(item);
@@ -442,7 +459,7 @@ public class MassManager {
             Item current = stack.pop();
             if (!visited.add(current)) continue;
 
-            if (baseItems.contains(current)) return true;
+            if (MassManager.baseItems.contains(current)) return true;
 
             for (Item next : graph.getOrDefault(current, Set.of())) {
                 stack.push(next);
@@ -450,5 +467,11 @@ public class MassManager {
         }
 
         return false;
+    }
+
+    public static void allChangedItems(List<ChangedItem> changedItems) {
+        for (ChangedItem item : changedItems) {
+            ConstructManager.INSTANCE.updateConstructCOMS(item);
+        }
     }
 }

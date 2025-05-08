@@ -5,8 +5,6 @@ import dev.manifold.mass.MassManager;
 import dev.manifold.network.packets.*;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 
-import java.util.Optional;
-
 public class ManifoldPackets {
     public static void registerC2SPackets() {
         ServerPlayNetworking.registerGlobalReceiver(BreakInConstructC2SPacket.TYPE, (payload, context) -> context.server().execute(() -> ConstructManager.INSTANCE.breakBlockInConstruct(payload)));
@@ -15,7 +13,7 @@ public class ManifoldPackets {
 
         ServerPlayNetworking.registerGlobalReceiver(PickConstructBlockWithDataC2SPacket.TYPE, (payload, context) -> context.server().execute(() -> PickConstructBlockWithDataC2SPacket.handle(payload, context)));
 
-        ServerPlayNetworking.registerGlobalReceiver(MassReloadC2SPacket.TYPE, (packet, context) -> context.server().execute(() -> {MassManager.recalculateMasses(Optional.of(context.player()), context.player().server);MassManager.save(context.player().server);}));
+        ServerPlayNetworking.registerGlobalReceiver(MassReloadC2SPacket.TYPE, (packet, context) -> context.server().execute(() -> {MassManager.recalculateMasses(context.player(), context.player().server);MassManager.save(context.player().server);}));
 
         ServerPlayNetworking.registerGlobalReceiver(MassUpdateC2SPacket.TYPE, (packet, context) -> context.server().execute(() -> MassUpdateC2SPacket.handle(packet, context.server())));
 

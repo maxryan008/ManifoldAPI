@@ -1,6 +1,5 @@
 package dev.manifold.api;
 
-import dev.manifold.mass.MassManager;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.Items;
@@ -50,6 +49,7 @@ public class MassAPI implements MassApiEntrypoint {
         registry.register(Items.BIRCH_LOG,logsMass);
         registry.register(Items.CHERRY_LOG,logsMass);
         registry.register(Items.DARK_OAK_LOG,logsMass);
+        registry.register(Items.OAK_LOG,logsMass);
         registry.register(Items.JUNGLE_LOG,logsMass);
         registry.register(Items.MANGROVE_LOG,logsMass);
         registry.register(Items.SPRUCE_LOG,logsMass);

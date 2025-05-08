@@ -1,5 +1,6 @@
 package dev.manifold;
 
+import dev.manifold.mass.MassManager;
 import dev.manifold.network.packets.BreakInConstructC2SPacket;
 import dev.manifold.network.packets.ConstructSectionDataS2CPacket;
 import dev.manifold.network.packets.RemoveConstructS2CPacket;
@@ -13,6 +14,7 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.util.Mth;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
@@ -63,10 +65,12 @@ public class ConstructManager {
         UUID uuid = UUID.randomUUID();
 
         DynamicConstruct construct = new DynamicConstruct(uuid, simDimension.dimension(), center);
+        construct.setMass((int) MassManager.getMassOrDefault(state.getBlock().asItem()));
         simDimension.setBlock(center, state, 3);
 
         constructs.put(uuid, construct);
         regionOwners.put(region, uuid);
+        collisionManager.updateCollision(uuid, simDimension, construct.getSimOrigin(), construct.getNegativeBounds(), construct.getPositiveBounds());
         return uuid;
     }
 
@@ -154,7 +158,7 @@ public class ConstructManager {
         // -- Mass and COM update --
         Vec3 oldCOM = construct.getCenterOfMass();
         int oldMass = construct.getMass();
-        int blockMass = 1000; //todo make each block mass differant per block
+        int blockMass = (int) MassManager.getMassOrDefault(state.getBlock().asItem());
 
         Vec3 newBlockCOM = new Vec3(rel.getX() + 0.5, rel.getY() + 0.5, rel.getZ() + 0.5);
         Vec3 newCOM = oldCOM.scale(oldMass).add(newBlockCOM.scale(blockMass)).scale(1.0 / (oldMass + blockMass));
@@ -187,7 +191,7 @@ public class ConstructManager {
             Vec3 removedCOM = new Vec3(rel.getX() + 0.5, rel.getY() + 0.5, rel.getZ() + 0.5);
             Vec3 oldCOM = construct.getCenterOfMass();
             int oldMass = construct.getMass();
-            int blockMass = 1000; //todo make each block mass differant per block
+            int blockMass = (int) MassManager.getMassOrDefault(oldState.getBlock().asItem());
 
             if (oldMass <= blockMass) {
                 removeConstruct(construct.getId());
@@ -376,5 +380,52 @@ public class ConstructManager {
     public void setRotationalVelocity(UUID uuid, Quaternionf quaternionf) {
         DynamicConstruct construct = this.constructs.get(uuid);
         construct.setAngularVelocity(quaternionf);
+    }
+
+    public void updateConstructCOMS(MassManager.ChangedItem changedItem) {
+        Item targetItem = changedItem.item();
+        double oldMass = changedItem.oldMass();
+        double newBlockMass = changedItem.newMass();
+        double deltaPerBlock = newBlockMass - oldMass;
+
+        for (DynamicConstruct construct : constructs.values()) {
+            BlockPos origin = construct.getSimOrigin();
+            AABB box = construct.getBoundingBox();
+
+            BlockPos min = new BlockPos((int) box.minX, (int) box.minY, (int) box.minZ);
+            BlockPos max = new BlockPos((int) box.maxX, (int) box.maxY, (int) box.maxZ);
+
+            int totalAffected = 0;
+            Vec3 totalWeightedCOM = construct.getCenterOfMass().scale(construct.getMass());
+
+            for (BlockPos pos : BlockPos.betweenClosed(min, max)) {
+                BlockState state = simDimension.getBlockState(pos);
+                if (state.getBlock().asItem() == targetItem) {
+                    // Block found, calculate rel pos
+                    BlockPos rel = pos.subtract(origin);
+                    Vec3 comPoint = new Vec3(rel.getX() + 0.5, rel.getY() + 0.5, rel.getZ() + 0.5);
+
+                    // Apply delta mass * position
+                    totalWeightedCOM = totalWeightedCOM.add(comPoint.scale(deltaPerBlock));
+                    totalAffected++;
+                }
+            }
+
+            if (totalAffected > 0) {
+                int newConstructMass = construct.getMass() + (int) Math.round(totalAffected * deltaPerBlock);
+                Vec3 newCOM = totalWeightedCOM.scale(1.0 / newConstructMass);
+
+                // Apply COM correction to keep world position stable
+                Vec3 oldCOM = construct.getCenterOfMass();
+                Vec3 deltaCOM = newCOM.subtract(oldCOM);
+                Vector3f localShift = new Vector3f((float) deltaCOM.x, (float) deltaCOM.y, (float) deltaCOM.z);
+                localShift = localShift.rotate(construct.getRotation());
+
+                // Apply the position shift to compensate for pivot change
+                construct.setPosition(construct.getPosition().add(new Vec3(localShift)));
+                construct.setCenterOfMass(newCOM);
+                construct.setMass(newConstructMass);
+            }
+        }
     }
 }
