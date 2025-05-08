@@ -3,7 +3,6 @@ package dev.manifold.mass;
 import com.google.gson.*;
 import dev.manifold.ConstructManager;
 import dev.manifold.Manifold;
-import dev.manifold.api.MassAPI;
 import dev.manifold.network.packets.MassGuiDataRefreshS2CPacket;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.core.Registry;

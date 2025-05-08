@@ -3,26 +3,16 @@
   "id": "manifold",
   "version": "${version}",
   "name": "Manifold",
-  "description": "This is an example description! Tell everyone what your mod is about!",
-  "authors": [
-    "Me!"
-  ],
-  "contact": {
-    "homepage": "https://fabricmc.net/",
-    "sources": "https://github.com/FabricMC/fabric-example-mod"
-  },
-  "license": "CC0-1.0",
+  "description": "Physics api and client",
+  "authors": ["maxryan008"],
+  "license": "MIT",
   "icon": "assets/manifold/icon.png",
   "environment": "*",
   "entrypoints": {
-    "main": [
-      "dev.manifold.Manifold"
-    ],
-    "client": [
-      "dev.manifold.ManifoldClient"
-    ],
+    "main": ["dev.manifold.Manifold"],
+    "client": ["dev.manifold.ManifoldClient"],
     "manifold:mass": [
-      "dev.manifold.api.MassAPI"
+      "dev.manifold.mass.MassAPI"
     ]
   },
   "mixins": [
@@ -37,8 +27,5 @@
     "minecraft": "~1.21.1",
     "java": ">=21",
     "fabric-api": "*"
-  },
-  "suggests": {
-    "another-mod": "*"
   }
 }

@@ -1,5 +1,6 @@
-package dev.manifold.api;
+package dev.manifold.mass;
 
+import dev.manifold.api.MassApiEntrypoint;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.Items;
