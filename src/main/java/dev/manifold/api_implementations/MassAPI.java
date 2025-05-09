@@ -1,4 +1,4 @@
-package dev.manifold.mass;
+package dev.manifold.api_implementations;
 
 import dev.manifold.api.MassApiEntrypoint;
 import net.fabricmc.loader.api.FabricLoader;
