@@ -12,7 +12,7 @@
     "main": ["dev.manifold.Manifold"],
     "client": ["dev.manifold.ManifoldClient"],
     "manifold:mass": [
-      "dev.manifold.mass.MassAPI"
+      "dev.manifold.api_implementations.MassAPI"
     ]
   },
   "mixins": [

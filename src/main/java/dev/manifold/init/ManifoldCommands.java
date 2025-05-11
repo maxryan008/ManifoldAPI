@@ -130,7 +130,7 @@ public class ManifoldCommands {
                                                             BlockState state = BlockStateArgument.getBlock(ctx, "block").getState();
                                                             Vec3 pos = Vec3Argument.getVec3(ctx, "pos");
 
-                                                            UUID id = manager.createConstruct(state);
+                                                            UUID id = manager.createConstruct(state, source.getLevel());
                                                             manager.setPosition(id, pos);
 
                                                             String msg = "Created DynamicConstruct with UUID: " + id + " at " + pos;

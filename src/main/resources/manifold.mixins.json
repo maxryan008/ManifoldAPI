@@ -4,9 +4,13 @@
   "compatibilityLevel": "JAVA_21",
   "mixins": [
     "EntityMixin",
+    "MinecraftServerMixin",
     "ServerLevelSaveMixin",
-    "accessor.AbstractContainerMenuAccessor",
     "accessor.BlockBehaviourAccessor",
+    "accessor.ChunkMapMixin",
+    "accessor.EntityAccessor",
+    "accessor.MinecraftServerAccessor",
+    "accessor.ServerLevelAccessor",
     "accessor.ServerPlayerAccessor"
   ],
   "injectors": {

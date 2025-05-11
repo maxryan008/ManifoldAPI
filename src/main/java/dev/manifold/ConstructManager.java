@@ -19,6 +19,7 @@ import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.ShulkerBoxBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.LevelChunkSection;
@@ -59,12 +60,12 @@ public class ConstructManager {
         return new ConstructSaveData(constructs);
     }
 
-    public UUID createConstruct(BlockState state) {
+    public UUID createConstruct(BlockState state, ServerLevel level) {
         Vector2i region = findFreeRegion();
         BlockPos center = regionCenterToWorld(region);
         UUID uuid = UUID.randomUUID();
 
-        DynamicConstruct construct = new DynamicConstruct(uuid, simDimension.dimension(), center);
+        DynamicConstruct construct = new DynamicConstruct(uuid, level.dimension(), center);
         construct.setMass((int) MassManager.getMassOrDefault(state.getBlock().asItem()));
         simDimension.setBlock(center, state, 3);
 
@@ -175,12 +176,16 @@ public class ConstructManager {
         construct.setMass(oldMass + blockMass);
     }
 
-    public void breakBlockInConstruct(BreakInConstructC2SPacket packet) {
+    public void breakBlockInConstruct(BreakInConstructC2SPacket packet, ServerPlayNetworking.Context context) {
         DynamicConstruct construct = constructs.get(packet.constructId());
         if (construct == null) return;
 
         BlockState oldState = simDimension.getBlockState(packet.blockHitPos());
-        simDimension.setBlock(packet.blockHitPos(), Blocks.AIR.defaultBlockState(), 3);
+        if (!context.player().isCreative() || oldState.getBlock() instanceof ShulkerBoxBlock) {
+            simDimension.destroyBlock(packet.blockHitPos(), true, context.player());
+        } else {
+            simDimension.destroyBlock(packet.blockHitPos(), false, context.player());
+        }
         simDimension.levelEvent(2001, packet.blockHitPos(), Block.getId(oldState)); // Show break effect
 
         BlockPos rel = packet.blockHitPos().subtract(construct.getSimOrigin());
@@ -219,13 +224,9 @@ public class ConstructManager {
     public void expandBounds(UUID id, BlockPos rel) {
         DynamicConstruct construct = constructs.get(id);
         if (construct == null) return;
-        System.out.println("Expanding construct with relative pos " + rel);
 
         BlockPos neg = construct.getNegativeBounds();
         BlockPos pos = construct.getPositiveBounds();
-
-        System.out.println("Negative Bounds " + neg);
-        System.out.println("Positive Bounds " + pos);
 
         int newNegX = Math.min(neg.getX(), rel.getX() - 1);
         int newNegY = Math.min(neg.getY(), rel.getY() - 1);
@@ -234,9 +235,6 @@ public class ConstructManager {
         int newPosX = Math.max(pos.getX(), rel.getX() + 1);
         int newPosY = Math.max(pos.getY(), rel.getY() + 1);
         int newPosZ = Math.max(pos.getZ(), rel.getZ() + 1);
-
-        System.out.println("New Negative Bounds " + new BlockPos(newNegX, newNegY, newNegZ));
-        System.out.println("New Positive Bounds " + new BlockPos(newPosX, newPosY, newPosZ));
 
         construct.setNegativeBounds(new BlockPos(newNegX, newNegY, newNegZ));
         construct.setPositiveBounds(new BlockPos(newPosX, newPosY, newPosZ));
@@ -427,5 +425,41 @@ public class ConstructManager {
                 construct.setMass(newConstructMass);
             }
         }
+    }
+
+    public Optional<UUID> getConstructAt(Vec3 position) {
+        int regionX = Mth.floor((position.x + REGION_SIZE / 2.0 - REGION_CENTER.getX()) / REGION_SIZE);
+        int regionZ = Mth.floor((position.z + REGION_SIZE / 2.0 - REGION_CENTER.getZ()) / REGION_SIZE);
+        return Optional.ofNullable(regionOwners.get(new Vector2i(regionX, regionZ)));
+    }
+
+    public Optional<ServerLevel> getRenderLevel(UUID uuid) {
+        DynamicConstruct construct = this.constructs.get(uuid);
+        if (construct == null) return Optional.empty();
+
+        MinecraftServer server = simDimension.getServer();
+        if (server == null) return Optional.empty();
+
+        return Optional.ofNullable(server.getLevel(construct.getWorldKey()));
+    }
+
+    public Vec3 getPositionFromSim(UUID uuid, Vec3 simPosition) {
+        DynamicConstruct construct = constructs.get(uuid);
+        if (construct == null) throw new IllegalArgumentException("No construct with id " + uuid);
+
+        BlockPos simOrigin = construct.getSimOrigin();
+        Vec3 com = construct.getCenterOfMass();
+        Quaternionf rotation = construct.getRotation();
+        Vec3 worldPos = construct.getPosition();
+
+        // simPosition - simOrigin - com
+        Vec3 localHit = simPosition.subtract(Vec3.atLowerCornerOf(simOrigin)).subtract(com);
+
+        // rotate localHit by rotation
+        Vector3f rotated = new Vector3f((float) localHit.x, (float) localHit.y, (float) localHit.z);
+        rotated.rotate(rotation);
+
+        // Add construct's world position
+        return new Vec3(rotated.x, rotated.y, rotated.z).add(worldPos);
     }
 }
