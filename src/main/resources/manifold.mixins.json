@@ -10,6 +10,7 @@
     "accessor.ChunkMapMixin",
     "accessor.DataLayerStorageMapAccessor",
     "accessor.EntityAccessor",
+    "accessor.LayerLightStorageMixin",
     "accessor.LightEngineAccessor",
     "accessor.MinecraftServerAccessor",
     "accessor.ServerLevelAccessor",

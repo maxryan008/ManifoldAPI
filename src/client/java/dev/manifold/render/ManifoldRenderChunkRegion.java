@@ -1,6 +1,7 @@
 package dev.manifold.render;
 
 import dev.manifold.ConstructManager;
+import dev.manifold.DynamicConstruct;
 import dev.manifold.Manifold;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
@@ -19,6 +20,7 @@ import net.minecraft.world.phys.Vec3;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -89,11 +91,29 @@ public class ManifoldRenderChunkRegion implements BlockAndTintGetter, LightChunk
     }
 
     @Override
-    public int getRawBrightness(BlockPos blockPos, int i) {
-        Vec3 skyPos = ConstructManager.INSTANCE.getPositionFromSim(ConstructManager.INSTANCE.getConstructAt(Vec3.atLowerCornerOf(blockPos)).get(), Vec3.atLowerCornerOf(blockPos));
-        int j = getLightEngine().getLayerListener(LightLayer.SKY).getLightValue(blockPos.offset((int) skyPos.x, (int) skyPos.y, (int) skyPos.z)) - i;
-        int k = ConstructManager.INSTANCE.getSimDimension().getLightEngine().getLayerListener(LightLayer.BLOCK).getLightValue(blockPos);
-        return Math.max(k, j);
+    public int getRawBrightness(BlockPos blockPos, int lightReduction) {
+        // Sky light from render world (unchanged)
+        Vec3 skyPos = ConstructManager.INSTANCE.getRenderPosFromSim(
+                ConstructManager.INSTANCE.getConstructAt(Vec3.atLowerCornerOf(blockPos)).get(),
+                Vec3.atLowerCornerOf(blockPos)
+        );
+        int skyLight = getLightEngine().getLayerListener(LightLayer.SKY)
+                .getLightValue(blockPos.offset((int) skyPos.x, (int) skyPos.y, (int) skyPos.z)) - lightReduction;
+
+        // Block light from nearby constructs in render space
+        int blockLight = 0;
+        List<DynamicConstruct> nearby = ConstructManager.INSTANCE.getNearbyConstructs(Vec3.atCenterOf(blockPos), 2);
+        for (DynamicConstruct construct : nearby) {
+            BlockPos simPos = ConstructManager.INSTANCE.getSimPosFromRender(construct.getId(), Vec3.atCenterOf(blockPos));
+            int val = ConstructManager.INSTANCE.getSimDimension()
+                    .getLightEngine()
+                    .getLayerListener(LightLayer.BLOCK)
+                    .getLightValue(simPos);
+            blockLight = Math.max(blockLight, val);
+            if (blockLight >= 15) break;
+        }
+
+        return Math.max(skyLight, blockLight);
     }
 
     @Override

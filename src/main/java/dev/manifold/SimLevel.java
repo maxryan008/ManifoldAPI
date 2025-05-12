@@ -44,7 +44,7 @@ public class SimLevel extends ServerLevel {
             Optional<Quaternionf> rotation = ConstructManager.INSTANCE.getRotation(construct);
             if (level.isPresent() && rotation.isPresent()) {
                 ((EntityAccessor) entity).setLevel(level.get());
-                entity.setPos(ConstructManager.INSTANCE.getPositionFromSim(construct, entity.position()));
+                entity.setPos(ConstructManager.INSTANCE.getRenderPosFromSim(construct, entity.position()));
                 Vec3 velocity = entity.getDeltaMovement();
                 Vector3f rotatedVelocity = new Vector3f((float) velocity.x, (float) velocity.y, (float) velocity.z);
                 rotatedVelocity.rotate(rotation.get());
@@ -63,7 +63,7 @@ public class SimLevel extends ServerLevel {
             UUID construct = uuid.get();
             Optional<ServerLevel> level = ConstructManager.INSTANCE.getRenderLevel(construct);
             if (level.isPresent()) {
-                Vec3 position = ConstructManager.INSTANCE.getPositionFromSim(construct, Vec3.atLowerCornerOf(blockPos));
+                Vec3 position = ConstructManager.INSTANCE.getRenderPosFromSim(construct, Vec3.atLowerCornerOf(blockPos));
                 if (lightLayer == LightLayer.SKY) {
                     return level.get().getLightEngine().getLayerListener(lightLayer).getLightValue(BlockPos.containing(position));
                 } else if (lightLayer == LightLayer.BLOCK) {

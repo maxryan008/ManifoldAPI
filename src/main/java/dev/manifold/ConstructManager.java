@@ -473,7 +473,7 @@ public class ConstructManager {
         return Optional.ofNullable(server.getLevel(construct.getWorldKey()));
     }
 
-    public Vec3 getPositionFromSim(UUID uuid, Vec3 simPosition) {
+    public Vec3 getRenderPosFromSim(UUID uuid, Vec3 simPosition) {
         DynamicConstruct construct = constructs.get(uuid);
         if (construct == null) throw new IllegalArgumentException("No construct with id " + uuid);
 
@@ -491,5 +491,27 @@ public class ConstructManager {
 
         // Add construct's world position
         return new Vec3(rotated.x, rotated.y, rotated.z).add(worldPos);
+    }
+
+    public BlockPos getSimPosFromRender(UUID uuid, Vec3 renderPos) {
+        DynamicConstruct construct = constructs.get(uuid);
+        if (construct == null) throw new IllegalArgumentException("No construct with id " + uuid);
+
+        BlockPos simOrigin = construct.getSimOrigin();
+        Vec3 com = construct.getCenterOfMass();
+        Quaternionf rotation = new Quaternionf(construct.getRotation()).invert(); // inverse rotation
+        Vec3 worldPos = construct.getPosition();
+
+        // Step 1: Subtract world position
+        Vec3 localRender = renderPos.subtract(worldPos);
+
+        // Step 2: Inverse rotate
+        Vector3f unrotated = new Vector3f((float) localRender.x, (float) localRender.y, (float) localRender.z);
+        unrotated.rotate(rotation);
+
+        // Step 3–4: Add back center of mass and sim origin
+        Vec3 simPos = new Vec3(unrotated.x, unrotated.y, unrotated.z).add(com).add(Vec3.atLowerCornerOf(simOrigin));
+
+        return BlockPos.containing(simPos);
     }
 }
