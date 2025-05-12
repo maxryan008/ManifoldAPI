@@ -2,6 +2,7 @@ package dev.manifold;
 
 import dev.manifold.gui.MassScreen;
 import dev.manifold.mass.MassManager;
+import dev.manifold.mixin.accessor.LightEngineAccessor;
 import dev.manifold.network.packets.*;
 import dev.manifold.render.ManifoldRenderChunk;
 import dev.manifold.render.ManifoldRenderChunkRegion;
@@ -18,6 +19,7 @@ import net.minecraft.client.Camera;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.SectionPos;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.Tag;
@@ -33,9 +35,15 @@ import net.minecraft.world.item.TooltipFlag;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.LightLayer;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.chunk.DataLayer;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.LevelChunkSection;
+import net.minecraft.world.level.lighting.LayerLightEventListener;
+import net.minecraft.world.level.lighting.LayerLightSectionStorage;
+import net.minecraft.world.level.lighting.LevelLightEngine;
+import net.minecraft.world.level.lighting.LightEngine;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
@@ -239,7 +247,7 @@ public class ManifoldClient implements ClientModInitializer {
     }
 
     private void handleConstructSectionData(ConstructSectionDataS2CPacket packet) {
-        if (renderer == null) return; // Still waiting for renderer
+        if (renderer == null) return;
 
         List<CompoundTag> chunkNbtList = packet.chunkNbtList();
         int countX = packet.chunkSizeX();
@@ -247,6 +255,7 @@ public class ManifoldClient implements ClientModInitializer {
 
         Level level = Minecraft.getInstance().level;
         Map<Long, ManifoldRenderChunk> chunkArray = new HashMap<>();
+        LevelLightEngine lightEngine = ConstructManager.INSTANCE.getSimDimension().getLightEngine();
 
         for (CompoundTag tag : chunkNbtList) {
             ChunkPos pos = new ChunkPos(tag.getInt("xPos"), tag.getInt("zPos"));
@@ -254,19 +263,35 @@ public class ManifoldClient implements ClientModInitializer {
 
             if (tag.contains("Sections", Tag.TAG_COMPOUND)) {
                 CompoundTag sectionsTag = tag.getCompound("Sections");
-                for (String yStr : sectionsTag.getAllKeys()) {
-                    try {
-                        int y = Integer.parseInt(yStr);
-                        byte[] sectionBytes = sectionsTag.getByteArray(yStr);
 
+                for (int y = 0; y < chunk.getSections().length; y++) {
+                    int sectionY = y + chunk.getMinSection();
+                    SectionPos sectionPos = SectionPos.of(pos, sectionY);
+                    long sectionKey = sectionPos.asLong();
+
+                    // Reconstruct section block data
+                    String sectionKeyStr = "Section_" + sectionY;
+                    if (sectionsTag.contains(sectionKeyStr, Tag.TAG_BYTE_ARRAY)) {
+                        byte[] sectionBytes = sectionsTag.getByteArray(sectionKeyStr);
                         FriendlyByteBuf buf = new FriendlyByteBuf(Unpooled.wrappedBuffer(sectionBytes));
-                        assert level != null;
                         LevelChunkSection section = new LevelChunkSection(level.registryAccess().registryOrThrow(Registries.BIOME));
                         section.read(buf);
+                        chunk.getSections()[y] = section;
+                    }
 
-                        chunk.getSections()[y - chunk.getMinSection()] = section;
-                    } catch (Exception e) {
-                        Manifold.LOGGER.warn("Failed to load sections y={} for chunk {}", yStr, pos, e);
+                    // Reconstruct light data
+                    for (LightLayer layer : LightLayer.values()) {
+                        String lightKey = layer.name() + "Light_" + sectionY;
+                        if (sectionsTag.contains(lightKey, Tag.TAG_BYTE_ARRAY)) {
+                            byte[] lightData = sectionsTag.getByteArray(lightKey);
+                            DataLayer layerData = new DataLayer(lightData.clone());
+
+                            LayerLightEventListener listener = lightEngine.getLayerListener(layer);
+                            if (listener instanceof LightEngine<?, ?> engine) {
+                                LayerLightSectionStorage<?> storage = ((LightEngineAccessor) engine).manifold$getStorage();
+                                lightEngine.queueSectionData(layer, sectionPos, layerData);
+                            }
+                        }
                     }
                 }
             }
@@ -279,7 +304,6 @@ public class ManifoldClient implements ClientModInitializer {
         );
 
         regions.put(packet.constructId(), region);
-
         renderer.uploadMesh(packet.constructId(), packet.origin(), region);
     }
 

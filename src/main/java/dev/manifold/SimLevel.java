@@ -10,6 +10,7 @@ import net.minecraft.world.RandomSequences;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.CustomSpawner;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.LightLayer;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.dimension.LevelStem;
 import net.minecraft.world.level.storage.LevelStorageSource;
@@ -53,5 +54,23 @@ public class SimLevel extends ServerLevel {
             }
         }
         return false;
+    }
+
+    @Override
+    public int getBrightness(LightLayer lightLayer, BlockPos blockPos) {
+        Optional<UUID> uuid = ConstructManager.INSTANCE.getConstructAt(Vec3.atLowerCornerOf(blockPos));
+        if (uuid.isPresent()) {
+            UUID construct = uuid.get();
+            Optional<ServerLevel> level = ConstructManager.INSTANCE.getRenderLevel(construct);
+            if (level.isPresent()) {
+                Vec3 position = ConstructManager.INSTANCE.getPositionFromSim(construct, Vec3.atLowerCornerOf(blockPos));
+                if (lightLayer == LightLayer.SKY) {
+                    return level.get().getLightEngine().getLayerListener(lightLayer).getLightValue(BlockPos.containing(position));
+                } else if (lightLayer == LightLayer.BLOCK) {
+                    return ConstructManager.INSTANCE.getSimDimension().getLightEngine().getLayerListener(lightLayer).getLightValue(blockPos);
+                }
+            }
+        }
+        return 0;
     }
 }

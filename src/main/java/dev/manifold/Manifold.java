@@ -1,11 +1,11 @@
 package dev.manifold;
 
+import dev.manifold.access_holders.MinecraftServerStorageAccessHolder;
 import dev.manifold.init.ManifoldCommands;
 import dev.manifold.init.ManifoldDimensions;
 import dev.manifold.init.ManifoldMenus;
 import dev.manifold.init.ServerPacketRegistry;
 import dev.manifold.mass.MassManager;
-import dev.manifold.access_holders.MinecraftServerStorageAccessHolder;
 import dev.manifold.mixin.accessor.ChunkMapMixin;
 import dev.manifold.mixin.accessor.MinecraftServerAccessor;
 import dev.manifold.mixin.accessor.ServerLevelAccessor;

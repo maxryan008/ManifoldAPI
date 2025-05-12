@@ -14,6 +14,7 @@ import dev.manifold.render.ManifoldSectionCompiler;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.RenderBuffers;
 import net.minecraft.client.renderer.RenderType;
+import net.minecraft.client.renderer.ShaderInstance;
 import net.minecraft.client.renderer.chunk.SectionCompiler;
 import net.minecraft.client.renderer.chunk.SectionRenderDispatcher;
 import net.minecraft.core.BlockPos;
@@ -84,9 +85,10 @@ public class ConstructRenderCache {
 
                 SectionRenderDispatcher.RenderSection renderSection = dispatcher.new RenderSection(0, sectionOrigin.getX(), sectionOrigin.getY(), sectionOrigin.getZ());
 
+                BlockGetter blockGetter = new BlockGetter(region);
                 SectionCompiler.Results results = compiler.compile(
                         sectionPos,
-                        new BlockGetter(region),
+                        blockGetter,
                         ((SectionRenderDispatcher_RenderSectionAccessor) renderSection).manifold$createVertexSorting(),
                         buffers.fixedBufferPack()
                 );
@@ -189,7 +191,8 @@ public class ConstructRenderCache {
                         Matrix4f poseMatrix = stack.last().pose();
 
                         buffer.bind();
-                        buffer.drawWithShader(poseMatrix, RenderSystem.getProjectionMatrix(), RenderSystem.getShader());
+                        ShaderInstance shader = RenderSystem.getShader();
+                        buffer.drawWithShader(poseMatrix, RenderSystem.getProjectionMatrix(), shader);
                         VertexBuffer.unbind();
 
                         type.clearRenderState();

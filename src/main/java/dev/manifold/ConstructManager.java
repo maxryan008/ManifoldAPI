@@ -1,13 +1,18 @@
 package dev.manifold;
 
+import dev.manifold.access_holders.LayerLightStorageBridge;
 import dev.manifold.mass.MassManager;
+import dev.manifold.mixin.accessor.DataLayerStorageMapAccessor;
+import dev.manifold.mixin.accessor.LightEngineAccessor;
 import dev.manifold.network.packets.BreakInConstructC2SPacket;
 import dev.manifold.network.packets.ConstructSectionDataS2CPacket;
 import dev.manifold.network.packets.RemoveConstructS2CPacket;
 import dev.manifold.phyics.collision.ConstructCollisionManager;
 import io.netty.buffer.Unpooled;
+import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.SectionPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.server.MinecraftServer;
@@ -17,12 +22,15 @@ import net.minecraft.util.Mth;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.LightLayer;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.ShulkerBoxBlock;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.chunk.DataLayer;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.LevelChunkSection;
+import net.minecraft.world.level.lighting.*;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Quaternionf;
@@ -282,7 +290,6 @@ public class ConstructManager {
         for (int cx = minChunk.x; cx <= maxChunk.x; cx++) {
             for (int cz = minChunk.z; cz <= maxChunk.z; cz++) {
                 LevelChunk chunk = simDimension.getChunk(cx, cz);
-                LevelChunkSection[] sections = chunk.getSections();
 
                 CompoundTag chunkTag = new CompoundTag();
                 chunkTag.putInt("xPos", cx);
@@ -290,12 +297,35 @@ public class ConstructManager {
 
                 CompoundTag sectionsTag = new CompoundTag();
 
-                for (int y = 0; y < sections.length; y++) {
-                    LevelChunkSection section = sections[y];
+                ChunkPos pos = chunk.getPos();
+                LevelLightEngine lightEngine = simDimension.getLightEngine();
+
+                for (int y = 0; y < chunk.getSections().length; y++) {
+                    LevelChunkSection section = chunk.getSections()[y];
+                    int sectionY = y + chunk.getMinSection();
+                    SectionPos sectionPos = SectionPos.of(pos, sectionY);
+                    long sectionKey = sectionPos.asLong();
+
+                    // === Save block data ===
                     if (section != null && !section.hasOnlyAir()) {
                         FriendlyByteBuf buf = new FriendlyByteBuf(Unpooled.buffer());
                         section.write(buf);
-                        sectionsTag.putByteArray(Integer.toString(y + chunk.getMinSection()), buf.array());
+                        sectionsTag.putByteArray("Section_" + sectionY, buf.array()); // Store as Section_12, etc.
+                    }
+
+                    // === Save light data ===
+                    for (LightLayer layer : LightLayer.values()) {
+                        LayerLightEventListener listener = lightEngine.getLayerListener(layer);
+                        if (!(listener instanceof LightEngine<?, ?> engine)) continue;
+
+                        LayerLightSectionStorage<?> storage = ((LightEngineAccessor) engine).manifold$getStorage();
+                        DataLayerStorageMap<?> dataMap = ((LayerLightStorageBridge) storage).manifold$getUpdatingData();
+                        Long2ObjectMap<DataLayer> map = ((DataLayerStorageMapAccessor) dataMap).manifold$getMap();
+
+                        DataLayer data = map.get(sectionKey);
+                        if (data != null) {
+                            sectionsTag.putByteArray(layer.name() + "Light_" + sectionY, data.getData());
+                        }
                     }
                 }
 

@@ -1,19 +1,21 @@
 package dev.manifold.render;
 
+import dev.manifold.ConstructManager;
 import dev.manifold.Manifold;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.SectionPos;
-import net.minecraft.world.level.BlockAndTintGetter;
-import net.minecraft.world.level.ColorResolver;
-import net.minecraft.world.level.Level;
+import net.minecraft.world.level.*;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.chunk.LightChunk;
+import net.minecraft.world.level.chunk.LightChunkGetter;
 import net.minecraft.world.level.lighting.LevelLightEngine;
 import net.minecraft.world.level.material.FluidState;
+import net.minecraft.world.phys.Vec3;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -21,7 +23,7 @@ import java.util.Map;
 import java.util.Optional;
 
 @Environment(EnvType.CLIENT)
-public class ManifoldRenderChunkRegion implements BlockAndTintGetter {
+public class ManifoldRenderChunkRegion implements BlockAndTintGetter, LightChunkGetter {
     protected final Map<Long, ManifoldRenderChunk> chunks;
     protected final Level level;
     private final int chunkCountX;
@@ -77,8 +79,41 @@ public class ManifoldRenderChunkRegion implements BlockAndTintGetter {
     }
 
     @Override
+    public int getBrightness(LightLayer layer, BlockPos pos) {
+        if (layer == LightLayer.SKY) {
+            return getLightEngine().getLayerListener(layer).getLightValue(pos);
+        } else if (layer == LightLayer.BLOCK) {
+            return ConstructManager.INSTANCE.getSimDimension().getLightEngine().getLayerListener(layer).getLightValue(pos);
+        }
+        return 0;
+    }
+
+    @Override
+    public int getRawBrightness(BlockPos blockPos, int i) {
+        Vec3 skyPos = ConstructManager.INSTANCE.getPositionFromSim(ConstructManager.INSTANCE.getConstructAt(Vec3.atLowerCornerOf(blockPos)).get(), Vec3.atLowerCornerOf(blockPos));
+        int j = getLightEngine().getLayerListener(LightLayer.SKY).getLightValue(blockPos.offset((int) skyPos.x, (int) skyPos.y, (int) skyPos.z)) - i;
+        int k = ConstructManager.INSTANCE.getSimDimension().getLightEngine().getLayerListener(LightLayer.BLOCK).getLightValue(blockPos);
+        return Math.max(k, j);
+    }
+
+    @Override
     public int getBlockTint(BlockPos pos, ColorResolver colorResolver) {
         return level.getBlockTint(pos, colorResolver);
+    }
+
+    @Nullable
+    @Override
+    public LightChunk getChunkForLighting(int x, int z) {
+        return this.getWrappedLightChunk(x, z);
+    }
+
+    public @Nullable LightChunk getWrappedLightChunk(int chunkX, int chunkZ) {
+        return getChunk(chunkX, chunkZ).map(ManifoldRenderChunk::getWrappedChunk).orElse(null);
+    }
+
+    @Override
+    public BlockGetter getLevel() {
+        return this;
     }
 
     @Override

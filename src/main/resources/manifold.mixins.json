@@ -8,7 +8,9 @@
     "ServerLevelSaveMixin",
     "accessor.BlockBehaviourAccessor",
     "accessor.ChunkMapMixin",
+    "accessor.DataLayerStorageMapAccessor",
     "accessor.EntityAccessor",
+    "accessor.LightEngineAccessor",
     "accessor.MinecraftServerAccessor",
     "accessor.ServerLevelAccessor",
     "accessor.ServerPlayerAccessor"
