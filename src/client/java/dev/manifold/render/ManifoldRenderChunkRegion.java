@@ -23,6 +23,7 @@ import org.jetbrains.annotations.Nullable;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 
 @Environment(EnvType.CLIENT)
 public class ManifoldRenderChunkRegion implements BlockAndTintGetter, LightChunkGetter {
@@ -83,11 +84,31 @@ public class ManifoldRenderChunkRegion implements BlockAndTintGetter, LightChunk
     @Override
     public int getBrightness(LightLayer layer, BlockPos pos) {
         if (layer == LightLayer.SKY) {
-            return getLightEngine().getLayerListener(layer).getLightValue(pos);
-        } else if (layer == LightLayer.BLOCK) {
-            return ConstructManager.INSTANCE.getSimDimension().getLightEngine().getLayerListener(layer).getLightValue(pos);
+            return getLightEngine().getLayerListener(LightLayer.SKY).getLightValue(pos);
         }
-        return 0;
+
+        // BLOCK layer: check all nearby constructs
+        int maxLight = 0;
+
+        Vec3 worldPos = Vec3.atCenterOf(pos);
+
+        Optional<UUID> uuidOptional = ConstructManager.INSTANCE.getConstructAt(worldPos);
+
+        List<DynamicConstruct> nearbyConstructs = ConstructManager.INSTANCE.getNearbyConstructs(ConstructManager.INSTANCE.getRenderPosFromSim(uuidOptional.get(), worldPos), 2); // 2 chunks radius
+
+        for (DynamicConstruct construct : nearbyConstructs) {
+            Vec3 renderPosFromSim = ConstructManager.INSTANCE.getRenderPosFromSim(uuidOptional.get(), worldPos);
+            BlockPos simPosFromRender = ConstructManager.INSTANCE.getSimPosFromRender(construct.getId(), renderPosFromSim);
+
+            LevelLightEngine simEngine = ConstructManager.INSTANCE.getSimDimension().getLightEngine();
+            int light = simEngine.getLayerListener(LightLayer.BLOCK).getLightValue(simPosFromRender);
+            if (light > maxLight) {
+                maxLight = light;
+                if (maxLight >= 15) break; // max light, early exit
+            }
+        }
+
+        return maxLight;
     }
 
     @Override
