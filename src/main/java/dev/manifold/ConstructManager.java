@@ -7,7 +7,7 @@ import dev.manifold.mixin.accessor.LightEngineAccessor;
 import dev.manifold.network.packets.BreakInConstructC2SPacket;
 import dev.manifold.network.packets.ConstructSectionDataS2CPacket;
 import dev.manifold.network.packets.RemoveConstructS2CPacket;
-import dev.manifold.phyics.collision.ConstructCollisionManager;
+import dev.manifold.physics.collision.ConstructCollisionManager;
 import io.netty.buffer.Unpooled;
 import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;

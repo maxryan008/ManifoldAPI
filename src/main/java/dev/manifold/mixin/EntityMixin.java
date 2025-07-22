@@ -1,7 +1,7 @@
 package dev.manifold.mixin;
 
 import com.llamalad7.mixinextras.injector.ModifyReturnValue;
-import dev.manifold.phyics.collision.RotatedCollisionHandler;
+import dev.manifold.physics.collision.RotatedCollisionHandler;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
