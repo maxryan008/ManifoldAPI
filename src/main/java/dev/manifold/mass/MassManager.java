@@ -151,23 +151,21 @@ public class MassManager {
     }
 
     public static void recalculateMasses(MinecraftServer server) {
-        Map<Item, Set<Item>> forwardGraph = new HashMap<>();
-        Map<Item, List<CraftingRecipe>> outputRecipes = new HashMap<>();
         Registry<Item> itemRegistry = server.registryAccess().registryOrThrow(Registries.ITEM);
 
-        // Build dependency graph and recipe map
+        // Build forward deps (ingredient -> results) and map result -> its crafting recipes
+        Map<Item, Set<Item>> forwardGraph = new HashMap<>();
+        Map<Item, List<CraftingRecipe>> outputRecipes = new HashMap<>();
         for (RecipeHolder<? extends CraftingRecipe> holder : server.getRecipeManager().getAllRecipesFor(RecipeType.CRAFTING)) {
             CraftingRecipe recipe = holder.value();
             Item result = recipe.getResultItem(server.registryAccess()).getItem();
             outputRecipes.computeIfAbsent(result, r -> new ArrayList<>()).add(recipe);
 
             boolean isDye = isDyeRecipe(recipe, result, itemRegistry);
-
             for (Ingredient ing : recipe.getIngredients()) {
                 for (ItemStack stack : ing.getItems()) {
                     Item ingItem = stack.getItem();
-
-                    // Do NOT add edges from dye recipes if result is a stem item
+                    // Keep your special-case: skip dye edges into stems
                     if (!isDye || !stemItems.contains(result)) {
                         forwardGraph.computeIfAbsent(ingItem, k -> new HashSet<>()).add(result);
                     }
@@ -175,77 +173,148 @@ public class MassManager {
             }
         }
 
-        Set<Item> visited = new HashSet<>();
-        List<Item> sorted = new ArrayList<>();
-
-        // First pass: DFS from stems only
-        for (Item stem : stemItems) {
-            dfsTopo(stem, forwardGraph, visited, sorted);
-        }
-
-        // Second pass: DFS from all other auto items not yet visited
-        for (Item auto : autoMasses) {
-            if (!visited.contains(auto)) {
-                dfsTopo(auto, forwardGraph, visited, sorted);
+        // Known-mass items (manual overrides or base/MassAPI)
+        Set<Item> known = new HashSet<>();
+        for (Item i : itemRegistry) {
+            if (isOverridden(i) || isBase(i, server)) {
+                known.add(i);
             }
         }
 
-        // Precompute distance from each item to nearest base item
-        Map<Item, Integer> distanceToBase = new HashMap<>();
-        Deque<Item> queue = new ArrayDeque<>();
-
-        for (Item base : baseItems) {
-            distanceToBase.put(base, 0);
-            queue.add(base);
+        // Auto items are the candidates we will compute
+        Set<Item> candidates = new HashSet<>();
+        for (Item i : itemRegistry) {
+            if (!isOverridden(i) && !isBase(i, server)) {
+                candidates.add(i);
+                autoMasses.add(i); // keep your flag consistent
+            }
         }
+
+        // Helper: does this recipe have all ingredient masses known?
+        java.util.function.Predicate<CraftingRecipe> recipeReady = (CraftingRecipe r) -> {
+            for (Ingredient ing : r.getIngredients()) {
+                if (ing.isEmpty()) continue;
+                ItemStack[] options = ing.getItems();
+                if (options.length == 0) return false;
+
+                // Choose your “representative” ingredient consistently with your code:
+                Optional<Item> stemMatch = Arrays.stream(options)
+                        .map(ItemStack::getItem)
+                        .filter(stemItems::contains)
+                        .findFirst();
+                Item chosen = stemMatch.orElse(options[0].getItem());
+
+                if (!known.contains(chosen) && isAuto(chosen)) {
+                    // ingredient mass not known yet
+                    return false;
+                }
+            }
+            return true;
+        };
+
+        // Preferred recipe chooser (same idea as before, but only among ready recipes)
+        java.util.function.Function<Item, Optional<CraftingRecipe>> pickRecipe = (Item result) -> {
+            List<CraftingRecipe> all = outputRecipes.getOrDefault(result, List.of());
+            List<CraftingRecipe> ready = all.stream().filter(recipeReady).toList();
+            if (ready.isEmpty()) return Optional.empty();
+
+            // Keep your distance heuristic: prefer “closer to base” ingredients
+            // We can approximate by counting how many ingredients are NOT auto (i.e., already known),
+            // or reuse your old distance ranking if desired. Here’s a simple ranking to keep it deterministic:
+            return ready.stream().min(Comparator.comparingInt(r -> {
+                int score = 0;
+                for (Ingredient ing : r.getIngredients()) {
+                    ItemStack[] options = ing.getItems();
+                    if (options.length == 0) continue;
+                    Optional<Item> stemMatch = Arrays.stream(options)
+                            .map(ItemStack::getItem)
+                            .filter(stemItems::contains)
+                            .findFirst();
+                    Item chosen = stemMatch.orElse(options[0].getItem());
+                    // prefer known ingredients
+                    if (!known.contains(chosen)) score += 1;
+                }
+                return score;
+            }));
+        };
+
+        // Worklist seeded with anything that already has a ready recipe
+        Deque<Item> queue = new ArrayDeque<>();
+        for (Item item : candidates) {
+            if (pickRecipe.apply(item).isPresent()) queue.add(item);
+        }
+
+        List<ChangedItem> localChanges = new ArrayList<>();
 
         while (!queue.isEmpty()) {
-            Item current = queue.poll();
-            int dist = distanceToBase.get(current);
-            for (Item next : forwardGraph.getOrDefault(current, Set.of())) {
-                if (!distanceToBase.containsKey(next) || distanceToBase.get(next) > dist + 1) {
-                    distanceToBase.put(next, dist + 1);
-                    queue.add(next);
+            Item item = queue.poll();
+            if (known.contains(item)) continue; // might have been set earlier via another path
+
+            Optional<CraftingRecipe> opt = pickRecipe.apply(item);
+            if (opt.isEmpty()) continue; // not ready anymore (unlikely), skip
+
+            OptionalDouble massOpt = resolveRecipeMassUsingKnown(opt.get(), server, known);
+            if (massOpt.isEmpty()) continue; // guard
+
+            double newMass = massOpt.getAsDouble();
+            double oldMass = getMassOrDefault(item);
+            if (oldMass != newMass && item instanceof BlockItem) {
+                localChanges.add(new ChangedItem(item, oldMass, newMass));
+            }
+            overriddenMasses.put(item, newMass); // set computed mass
+            autoMasses.add(item);
+            known.add(item);
+
+            // Now that this is known, some dependents may have become ready
+            for (Item out : forwardGraph.getOrDefault(item, Set.of())) {
+                if (candidates.contains(out) && !known.contains(out) && pickRecipe.apply(out).isPresent()) {
+                    queue.add(out);
                 }
             }
         }
 
-        // Sort items again by distance to base, so that closer-to-base items resolve first
-        sorted.sort(Comparator.comparingInt(i -> distanceToBase.getOrDefault(i, 1000)));
-
-        // Resolve masses
-        for (Item item : sorted) {
-            if (!isAuto(item)) continue;
-
-            List<CraftingRecipe> allRecipes = outputRecipes.getOrDefault(item, List.of());
-
-            Optional<CraftingRecipe> preferredRecipe = allRecipes.stream()
-                    .min(Comparator.comparingInt(recipe -> {
-                        int total = 0;
-                        for (Ingredient ing : recipe.getIngredients()) {
-                            int ingDist = Arrays.stream(ing.getItems())
-                                    .map(stack -> distanceToBase.getOrDefault(stack.getItem(), 1000))
-                                    .min(Integer::compareTo)
-                                    .orElse(1000);
-                            total += ingDist;
-                        }
-                        return total;
-                    }));
-
-            preferredRecipe.map(r -> resolveRecipeMass(r, server)).ifPresent(mass -> {
-                double newMass = mass.orElse(DEFAULT_MASS);
-                double oldMass = getMassOrDefault(item);
-                if (oldMass != newMass) {
-                    if (item instanceof BlockItem) {
-                        changedItems.add(new ChangedItem(item, oldMass, newMass));
-                    }
+        // For any remaining candidates that never became ready (cycles/underdetermined),
+        // keep their existing mass if any, otherwise fall back to DEFAULT_MASS just once.
+        for (Item item : candidates) {
+            if (!known.contains(item)) {
+                if (!overriddenMasses.containsKey(item)) {
+                    overriddenMasses.put(item, DEFAULT_MASS);
                 }
-                overriddenMasses.put(item, newMass);
-            });
+            }
         }
 
-        allChangedItems(changedItems);
-        changedItems.clear();
+        allChangedItems(localChanges);
+    }
+
+    private static OptionalDouble resolveRecipeMassUsingKnown(CraftingRecipe recipe, MinecraftServer server, Set<Item> known) {
+        ItemStack resultStack = recipe.getResultItem(server.registryAccess());
+        int outputCount = resultStack.getCount();
+        if (outputCount <= 0) return OptionalDouble.empty();
+
+        double total = 0.0;
+
+        for (Ingredient ing : recipe.getIngredients()) {
+            if (ing.isEmpty()) continue;
+
+            ItemStack[] options = ing.getItems();
+            if (options.length == 0) return OptionalDouble.empty();
+
+            // Choose a deterministic representative (prefer stems)
+            Optional<Item> stemMatch = Arrays.stream(options)
+                    .map(ItemStack::getItem)
+                    .filter(stemItems::contains)
+                    .findFirst();
+            Item chosen = stemMatch.orElse(options[0].getItem());
+
+            // Must be known; caller ensures this via recipeReady()
+            if (!known.contains(chosen) && isAuto(chosen)) {
+                return OptionalDouble.empty();
+            }
+            total += getMassOrDefault(chosen);
+        }
+
+        if (total == 0.0) return OptionalDouble.empty();
+        return OptionalDouble.of(Math.round(total / outputCount));
     }
 
     public static void recalculateMasses(ServerPlayer response, MinecraftServer server) {
@@ -262,6 +331,7 @@ public class MassManager {
 
     private static void recalculateBaseItems(MinecraftServer server) {
         baseItems.clear();
+        stemItems.clear();
 
         Map<Item, Set<Item>> reverseGraph = new HashMap<>();
         RecipeManager manager = server.getRecipeManager();

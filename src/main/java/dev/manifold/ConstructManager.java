@@ -182,6 +182,10 @@ public class ConstructManager {
 
         construct.setCenterOfMass(newCOM);
         construct.setMass(oldMass + blockMass);
+
+        // -- Connectivity graph --
+
+        construct.getConnectivityGraph().addBlock(rel);
     }
 
     public void breakBlockInConstruct(BreakInConstructC2SPacket packet, ServerPlayNetworking.Context context) {
@@ -226,6 +230,10 @@ public class ConstructManager {
             // Commit changes
             construct.setCenterOfMass(newCOM);
             construct.setMass(oldMass - blockMass);
+
+            // Connectivity graph
+
+            construct.getConnectivityGraph().removeBlock(rel);
         }
     }
 
@@ -513,5 +521,116 @@ public class ConstructManager {
         Vec3 simPos = new Vec3(unrotated.x, unrotated.y, unrotated.z).add(com).add(Vec3.atLowerCornerOf(simOrigin));
 
         return BlockPos.containing(simPos);
+    }
+
+    public boolean trySeparateBlocks(UUID constructId, List<SeparatorRecord> separators) {
+        DynamicConstruct construct = constructs.get(constructId);
+        if (construct == null) return false;
+
+        BlockUnionGraph graph = construct.getConnectivityGraph();
+
+        // Temporarily remove edges between separator blocks
+        List<BlockPos> roots = new ArrayList<>();
+        for (SeparatorRecord r : separators) {
+            graph.disconnect(r.a(), r.b());
+            roots.add(r.a());
+            roots.add(r.b());
+        }
+
+        // Check if any roots now belong to different connected components
+        BlockPos reference = roots.get(0);
+        for (int i = 1; i < roots.size(); i++) {
+            if (!graph.connected(reference, roots.get(i))) {
+                // Found a separation
+                Set<BlockPos> component = graph.getGroup(roots.get(i));
+                UUID newId = ConstructManager.INSTANCE.splitConstruct(constructId, component);
+                return newId != null;
+            }
+        }
+
+        // If not separated, reconnect edges (optional)
+        for (SeparatorRecord r : separators) {
+            graph.union(r.a(), r.b());
+        }
+
+        return false;
+    }
+
+    public UUID splitConstruct(UUID originalId, Set<BlockPos> extractedRelBlocks) {
+        DynamicConstruct original = constructs.get(originalId);
+        if (original == null) return null;
+
+        UUID newId = createConstruct(Blocks.AIR.defaultBlockState(), simDimension); // temp block
+
+        DynamicConstruct newConstruct = constructs.get(newId);
+        BlockPos originalOrigin = original.getSimOrigin();
+        BlockPos newOrigin = newConstruct.getSimOrigin();
+
+        // Copy and move blocks
+        int totalMass = 0;
+        Vec3 weightedCOM = Vec3.ZERO;
+
+        for (BlockPos rel : extractedRelBlocks) {
+            BlockPos abs = originalOrigin.offset(rel);
+            BlockState state = simDimension.getBlockState(abs);
+            if (state.isAir()) continue;
+
+            BlockPos newRel = rel; // can offset if origin shifting is needed
+            BlockPos newAbs = newOrigin.offset(newRel);
+
+            simDimension.setBlock(newAbs, state, 3);
+            simDimension.setBlock(abs, Blocks.AIR.defaultBlockState(), 3);
+
+            newConstruct.getConnectivityGraph().addBlock(newRel);
+
+            int mass = (int) MassManager.getMassOrDefault(state.getBlock().asItem());
+            totalMass += mass;
+            weightedCOM = weightedCOM.add(new Vec3(newRel.getX() + 0.5, newRel.getY() + 0.5, newRel.getZ() + 0.5).scale(mass));
+        }
+
+        if (totalMass == 0) return null;
+
+        Vec3 newCOM = weightedCOM.scale(1.0 / totalMass);
+        newConstruct.setMass(totalMass);
+        newConstruct.setCenterOfMass(newCOM);
+        newConstruct.setPosition(original.getPosition()); // inherit world pos
+
+        // Shrink bounds of both constructs
+        updateConstructBounds(original);
+        updateConstructBounds(newConstruct);
+
+        return newId;
+    }
+
+    private void updateConstructBounds(DynamicConstruct construct) {
+        BlockUnionGraph graph = construct.getConnectivityGraph();
+        Set<BlockPos> allBlocks = graph.getGroup(graph.findAny());
+
+        if (allBlocks.isEmpty()) return;
+
+        int minX = Integer.MAX_VALUE, minY = Integer.MAX_VALUE, minZ = Integer.MAX_VALUE;
+        int maxX = Integer.MIN_VALUE, maxY = Integer.MIN_VALUE, maxZ = Integer.MIN_VALUE;
+
+        for (BlockPos pos : allBlocks) {
+            minX = Math.min(minX, pos.getX());
+            minY = Math.min(minY, pos.getY());
+            minZ = Math.min(minZ, pos.getZ());
+
+            maxX = Math.max(maxX, pos.getX());
+            maxY = Math.max(maxY, pos.getY());
+            maxZ = Math.max(maxZ, pos.getZ());
+        }
+
+        construct.setNegativeBounds(new BlockPos(minX - 1, minY - 1, minZ - 1));
+        construct.setPositiveBounds(new BlockPos(maxX + 1, maxY + 1, maxZ + 1));
+
+        // Optional: update collision
+        ConstructManager.INSTANCE.getCollisionManager().updateCollision(
+                construct.getId(),
+                ConstructManager.INSTANCE.getSimDimension(),
+                construct.getSimOrigin(),
+                construct.getNegativeBounds(),
+                construct.getPositiveBounds()
+        );
     }
 }

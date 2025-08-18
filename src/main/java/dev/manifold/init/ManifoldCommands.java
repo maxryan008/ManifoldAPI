@@ -5,6 +5,7 @@ import com.mojang.brigadier.arguments.DoubleArgumentType;
 import dev.manifold.ConstructManager;
 import dev.manifold.DynamicConstruct;
 import dev.manifold.Manifold;
+import dev.manifold.SeparatorRecord;
 import dev.manifold.gui.MassScreenHandler;
 import net.minecraft.ChatFormatting;
 import net.minecraft.commands.CommandBuildContext;
@@ -23,6 +24,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Quaternionf;
 
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -251,6 +253,40 @@ public class ManifoldCommands {
                                                                         )
                                                                 )
                                                         )
+                                                )
+                                        )
+                                )
+
+                                // --- /manifold constructs split <pos1> <pos2> ---
+                                .then(literal("split")
+                                        .then(argument("pos1", Vec3Argument.vec3())
+                                                .then(argument("pos2", Vec3Argument.vec3())
+                                                        .executes(ctx -> {
+                                                            Vec3 v1 = Vec3Argument.getVec3(ctx, "pos1");
+                                                            Vec3 v2 = Vec3Argument.getVec3(ctx, "pos2");
+
+                                                            BlockPos b1 = BlockPos.containing(v1);
+                                                            BlockPos b2 = BlockPos.containing(v2);
+
+                                                            ConstructManager manager = ConstructManager.INSTANCE;
+
+                                                            UUID constructId = manager.getConstructAt(v1).orElse(null);
+                                                            if (constructId == null) {
+                                                                ctx.getSource().sendFailure(Component.literal("No construct found at first position."));
+                                                                return 0;
+                                                            }
+
+                                                            SeparatorRecord record = new SeparatorRecord(b1, b2);
+                                                            boolean success = manager.trySeparateBlocks(constructId, List.of(record));
+
+                                                            if (success) {
+                                                                ctx.getSource().sendSuccess(() -> Component.literal("Construct was successfully split."), true);
+                                                            } else {
+                                                                ctx.getSource().sendFailure(Component.literal("Construct could not be split. Still connected."));
+                                                            }
+
+                                                            return 1;
+                                                        })
                                                 )
                                         )
                                 )

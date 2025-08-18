@@ -61,6 +61,8 @@ public class DynamicConstruct {
     private int mass;
     private Vec3 centerOfMass;
 
+    private final BlockUnionGraph unionGraph = new BlockUnionGraph(); //todo make this reload on world load. or save it?
+
     public DynamicConstruct(UUID id, ResourceKey<Level> world, BlockPos simOrigin) {
         this.id = id;
         this.world = world;
@@ -196,5 +198,9 @@ public class DynamicConstruct {
         if (Float.isNaN(this.rotation.x)) {
             this.rotation = new Quaternionf(0, 0, 0, 1);
         }
+    }
+
+    public BlockUnionGraph getConnectivityGraph() {
+        return unionGraph;
     }
 }
