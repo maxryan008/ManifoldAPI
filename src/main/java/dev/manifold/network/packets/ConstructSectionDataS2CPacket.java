@@ -2,10 +2,13 @@ package dev.manifold.network.packets;
 
 import dev.manifold.Constant;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.world.level.Level;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.ArrayList;
@@ -19,7 +22,8 @@ public record ConstructSectionDataS2CPacket(
         int minChunkZ,
         int chunkSizeX,
         int chunkSizeZ,
-        List<CompoundTag> chunkNbtList
+        List<CompoundTag> chunkNbtList,
+        ResourceKey<Level> worldKey
 ) implements CustomPacketPayload {
     public static final CustomPacketPayload.Type<ConstructSectionDataS2CPacket> TYPE =
             new CustomPacketPayload.Type<>(Constant.id("construct_section"));
@@ -44,8 +48,11 @@ public record ConstructSectionDataS2CPacket(
             chunkNbtList.add(buf.readNbt());
         }
 
+        // NEW: read the target render dimension
+        ResourceKey<Level> worldKey = buf.readResourceKey(Registries.DIMENSION);
+
         return new ConstructSectionDataS2CPacket(
-                constructId, origin, minChunkX, minChunkZ, chunkSizeX, chunkSizeZ, chunkNbtList
+                constructId, origin, minChunkX, minChunkZ, chunkSizeX, chunkSizeZ, chunkNbtList, worldKey
         );
     }
 
@@ -61,6 +68,9 @@ public record ConstructSectionDataS2CPacket(
         for (CompoundTag tag : packet.chunkNbtList()) {
             buf.writeNbt(tag);
         }
+
+        // NEW: write the target render dimension
+        buf.writeResourceKey(packet.worldKey());
     }
 
     @Override

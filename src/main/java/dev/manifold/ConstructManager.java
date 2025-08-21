@@ -15,6 +15,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.SectionPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -90,8 +91,11 @@ public class ConstructManager {
             regionOwners.remove(getRegionIndex(construct.getSimOrigin()));
             collisionManager.remove(id);
 
+            // notify only players in the construct's render dimension
             for (ServerPlayer player : simDimension.getServer().getPlayerList().getPlayers()) {
-                ServerPlayNetworking.send(player, new RemoveConstructS2CPacket(id));
+                if (player.serverLevel().dimension().equals(construct.getWorldKey())) {
+                    ServerPlayNetworking.send(player, new RemoveConstructS2CPacket(id));
+                }
             }
         }
     }
@@ -260,31 +264,34 @@ public class ConstructManager {
 
     public void tick(MinecraftServer server) {
         for (DynamicConstruct construct : constructs.values()) {
-            //call physics tick
+            // physics update
             construct.physicsTick();
 
+            // compute sim chunks to keep loaded (in sim dimension)
             AABB box = construct.getBoundingBox();
             ChunkPos minChunk = new ChunkPos(Mth.floor(box.minX) >> 4, Mth.floor(box.minZ) >> 4);
-            ChunkPos maxChunk = new ChunkPos(Mth.ceil(box.maxX) >> 4, Mth.ceil(box.maxZ) >> 4);
+            ChunkPos maxChunk = new ChunkPos(Mth.ceil(box.maxX)  >> 4, Mth.ceil(box.maxZ)  >> 4);
 
-            minChunk = new ChunkPos(minChunk.x, minChunk.z);
-            maxChunk = new ChunkPos(maxChunk.x, maxChunk.z);
-
-            // Force-load chunks for ticking
             for (int x = minChunk.x; x <= maxChunk.x; x++) {
                 for (int z = minChunk.z; z <= maxChunk.z; z++) {
                     simDimension.setChunkForced(x, z, true);
                 }
             }
 
-            // Send section data to players regardless of dimension
+            // send section data ONLY to players in the construct's render dimension
             for (ServerPlayer player : server.getPlayerList().getPlayers()) {
                 if (!player.connection.isAcceptingMessages()) continue;
 
-                Vec3 playerPos = player.position();
+                // *** Dimension gate ***
+                if (!player.serverLevel().dimension().equals(construct.getWorldKey())) {
+                    continue;
+                }
+
+                // optional distance cull in render space (world coords)
+                Vec3 p = player.position();
                 if (construct.getRenderBoundingBox().intersects(
-                        playerPos.x - 128, playerPos.y - 128, playerPos.z - 128,
-                        playerPos.x + 128, playerPos.y + 128, playerPos.z + 128)) {
+                        p.x - 128, p.y - 128, p.z - 128,
+                        p.x + 128, p.y + 128, p.z + 128)) {
 
                     sendChunkDataToPlayer(player, construct, minChunk, maxChunk);
                 }
@@ -348,19 +355,21 @@ public class ConstructManager {
                 minChunk.x, minChunk.z,
                 maxChunk.x - minChunk.x + 1,
                 maxChunk.z - minChunk.z + 1,
-                sectionNBTs
+                sectionNBTs,
+                construct.getWorldKey()
         );
 
         ServerPlayNetworking.send(player, packet);
     }
 
-    public List<DynamicConstruct> getNearbyConstructs(Vec3 center, int chunkRadius) {
-        int radiusBlocks = chunkRadius * 16;
+    public List<DynamicConstruct> getNearbyConstructs(ResourceKey<Level> worldKey, Vec3 center, int chunkRadius) {
+        int r = chunkRadius * 16;
         return constructs.values().stream()
-                .filter(construct -> {
-                    AABB box = construct.getRenderBoundingBox();
-                    return box.intersects(center.x - radiusBlocks, center.y - radiusBlocks, center.z - radiusBlocks,
-                            center.x + radiusBlocks, center.y + radiusBlocks, center.z + radiusBlocks);
+                .filter(c -> c.getWorldKey().equals(worldKey))
+                .filter(c -> {
+                    AABB box = c.getRenderBoundingBox();
+                    return box.intersects(center.x - r, center.y - r, center.z - r,
+                            center.x + r, center.y + r, center.z + r);
                 })
                 .toList();
     }

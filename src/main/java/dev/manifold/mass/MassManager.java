@@ -14,6 +14,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.*;
 
 import java.io.*;
@@ -68,7 +69,7 @@ public class MassManager {
     }
 
     public static boolean isOverridden(Item item) {
-        return overriddenMasses.containsKey(item) || MassAPI.contains(item);
+        return hasManualOverride(item) || MassAPI.contains(item);
     }
 
     public static void save(MinecraftServer server) {
@@ -97,6 +98,14 @@ public class MassManager {
         } catch (IOException e) {
             e.printStackTrace();
         }
+    }
+
+    private static boolean hasManualOverride(Item item) {
+        return overriddenMasses.containsKey(item) && !autoMasses.contains(item);
+    }
+
+    private static boolean hasAutoComputedMass(Item item) {
+        return overriddenMasses.containsKey(item) && autoMasses.contains(item);
     }
 
     public static void load(MinecraftServer server) {
@@ -165,7 +174,7 @@ public class MassManager {
             for (Ingredient ing : recipe.getIngredients()) {
                 for (ItemStack stack : ing.getItems()) {
                     Item ingItem = stack.getItem();
-                    // Keep your special-case: skip dye edges into stems
+                    // keep special-case: skip dye edges into stems
                     if (!isDye || !stemItems.contains(result)) {
                         forwardGraph.computeIfAbsent(ingItem, k -> new HashSet<>()).add(result);
                     }
@@ -173,72 +182,52 @@ public class MassManager {
             }
         }
 
-        // Known-mass items (manual overrides or base/MassAPI)
+        // Known items: MANUAL overrides, MassAPI-provided, or base items
         Set<Item> known = new HashSet<>();
         for (Item i : itemRegistry) {
-            if (isOverridden(i) || isBase(i, server)) {
+            if (hasManualOverride(i) || MassAPI.contains(i) || isBase(i, server)) {
                 known.add(i);
             }
         }
 
-        // Auto items are the candidates we will compute
+        // Candidates: anything NOT manual-override, NOT MassAPI, NOT base
         Set<Item> candidates = new HashSet<>();
         for (Item i : itemRegistry) {
-            if (!isOverridden(i) && !isBase(i, server)) {
+            if (!hasManualOverride(i) && !MassAPI.contains(i) && !isBase(i, server)) {
                 candidates.add(i);
-                autoMasses.add(i); // keep your flag consistent
+                autoMasses.add(i); // flag as auto-computed domain
             }
         }
 
-        // Helper: does this recipe have all ingredient masses known?
+        // Recipe readiness: all chosen ingredients must be known
         java.util.function.Predicate<CraftingRecipe> recipeReady = (CraftingRecipe r) -> {
             for (Ingredient ing : r.getIngredients()) {
                 if (ing.isEmpty()) continue;
-                ItemStack[] options = ing.getItems();
-                if (options.length == 0) return false;
-
-                // Choose your “representative” ingredient consistently with your code:
-                Optional<Item> stemMatch = Arrays.stream(options)
-                        .map(ItemStack::getItem)
-                        .filter(stemItems::contains)
-                        .findFirst();
-                Item chosen = stemMatch.orElse(options[0].getItem());
-
-                if (!known.contains(chosen) && isAuto(chosen)) {
-                    // ingredient mass not known yet
-                    return false;
-                }
+                Item choice = chooseIngredientItem(ing);
+                if (choice == null) return false;
+                if (!known.contains(choice) && isAuto(choice)) return false;
             }
             return true;
         };
 
-        // Preferred recipe chooser (same idea as before, but only among ready recipes)
+        // Preferred recipe among ready ones (min unknown-score)
         java.util.function.Function<Item, Optional<CraftingRecipe>> pickRecipe = (Item result) -> {
             List<CraftingRecipe> all = outputRecipes.getOrDefault(result, List.of());
             List<CraftingRecipe> ready = all.stream().filter(recipeReady).toList();
             if (ready.isEmpty()) return Optional.empty();
 
-            // Keep your distance heuristic: prefer “closer to base” ingredients
-            // We can approximate by counting how many ingredients are NOT auto (i.e., already known),
-            // or reuse your old distance ranking if desired. Here’s a simple ranking to keep it deterministic:
             return ready.stream().min(Comparator.comparingInt(r -> {
                 int score = 0;
                 for (Ingredient ing : r.getIngredients()) {
-                    ItemStack[] options = ing.getItems();
-                    if (options.length == 0) continue;
-                    Optional<Item> stemMatch = Arrays.stream(options)
-                            .map(ItemStack::getItem)
-                            .filter(stemItems::contains)
-                            .findFirst();
-                    Item chosen = stemMatch.orElse(options[0].getItem());
-                    // prefer known ingredients
-                    if (!known.contains(chosen)) score += 1;
+                    Item choice = chooseIngredientItem(ing);
+                    if (choice == null) continue;
+                    if (!known.contains(choice)) score += 1; // prefer more-known inputs
                 }
                 return score;
             }));
         };
 
-        // Worklist seeded with anything that already has a ready recipe
+        // Initial worklist
         Deque<Item> queue = new ArrayDeque<>();
         for (Item item : candidates) {
             if (pickRecipe.apply(item).isPresent()) queue.add(item);
@@ -246,26 +235,27 @@ public class MassManager {
 
         List<ChangedItem> localChanges = new ArrayList<>();
 
+        // Worklist propagation (no defaults mid-pass)
         while (!queue.isEmpty()) {
             Item item = queue.poll();
-            if (known.contains(item)) continue; // might have been set earlier via another path
+            if (known.contains(item)) continue;
 
             Optional<CraftingRecipe> opt = pickRecipe.apply(item);
-            if (opt.isEmpty()) continue; // not ready anymore (unlikely), skip
+            if (opt.isEmpty()) continue;
 
             OptionalDouble massOpt = resolveRecipeMassUsingKnown(opt.get(), server, known);
-            if (massOpt.isEmpty()) continue; // guard
+            if (massOpt.isEmpty()) continue;
 
             double newMass = massOpt.getAsDouble();
             double oldMass = getMassOrDefault(item);
             if (oldMass != newMass && item instanceof BlockItem) {
                 localChanges.add(new ChangedItem(item, oldMass, newMass));
             }
-            overriddenMasses.put(item, newMass); // set computed mass
-            autoMasses.add(item);
+            overriddenMasses.put(item, newMass);
+            // base items should never be auto
+            if (baseItems.contains(item)) autoMasses.remove(item); else autoMasses.add(item);
             known.add(item);
 
-            // Now that this is known, some dependents may have become ready
             for (Item out : forwardGraph.getOrDefault(item, Set.of())) {
                 if (candidates.contains(out) && !known.contains(out) && pickRecipe.apply(out).isPresent()) {
                     queue.add(out);
@@ -273,17 +263,250 @@ public class MassManager {
             }
         }
 
-        // For any remaining candidates that never became ready (cycles/underdetermined),
-        // keep their existing mass if any, otherwise fall back to DEFAULT_MASS just once.
-        for (Item item : candidates) {
-            if (!known.contains(item)) {
-                if (!overriddenMasses.containsKey(item)) {
-                    overriddenMasses.put(item, DEFAULT_MASS);
+        // Solve non-trivial cycles (SCCs) only; leave singletons to the worklist
+        Set<Item> unresolved = candidates.stream().filter(i -> !known.contains(i)).collect(Collectors.toSet());
+        if (!unresolved.isEmpty()) {
+            List<Set<Item>> sccs = stronglyConnectedComponents(unresolved, forwardGraph);
+
+            // 1) Solve true cycles
+            for (Set<Item> scc : sccs) {
+                if (scc.size() <= 1) continue; // skip singletons here
+                boolean hasRecipe = scc.stream().anyMatch(i -> !outputRecipes.getOrDefault(i, List.of()).isEmpty());
+                if (!hasRecipe) continue;
+                solveSccMasses(scc, outputRecipes, known, server, DEFAULT_MASS);
+            }
+
+            // 2) Re-run worklist to consume newly known cycle outputs (e.g., spyglass after copper)
+            Deque<Item> q2 = new ArrayDeque<>();
+            for (Item item : candidates) {
+                if (!known.contains(item) && pickRecipe.apply(item).isPresent()) {
+                    q2.add(item);
+                }
+            }
+            while (!q2.isEmpty()) {
+                Item item = q2.poll();
+                if (known.contains(item)) continue;
+
+                Optional<CraftingRecipe> opt = pickRecipe.apply(item);
+                if (opt.isEmpty()) continue;
+
+                OptionalDouble massOpt = resolveRecipeMassUsingKnown(opt.get(), server, known);
+                if (massOpt.isEmpty()) continue;
+
+                double newMass = massOpt.getAsDouble();
+                double oldMass = getMassOrDefault(item);
+                if (oldMass != newMass && item instanceof BlockItem) {
+                    localChanges.add(new ChangedItem(item, oldMass, newMass));
+                }
+                overriddenMasses.put(item, newMass);
+                if (baseItems.contains(item)) autoMasses.remove(item); else autoMasses.add(item);
+                known.add(item);
+
+                for (Item out : forwardGraph.getOrDefault(item, Set.of())) {
+                    if (candidates.contains(out) && !known.contains(out) && pickRecipe.apply(out).isPresent()) {
+                        q2.add(out);
+                    }
                 }
             }
         }
 
+        // Final guard: anything still unknown gets a default once
+        for (Item item : candidates) {
+            if (!known.contains(item) && !overriddenMasses.containsKey(item)) {
+                overriddenMasses.put(item, DEFAULT_MASS);
+            }
+        }
+
+        // Ensure base items are never flagged auto
+        for (Item b : baseItems) {
+            autoMasses.remove(b);
+        }
+
         allChangedItems(localChanges);
+    }
+
+    private static Item pickPivot(Set<Item> vars, MinecraftServer server) {
+        Registry<Item> itemRegistry = server.registryAccess().registryOrThrow(Registries.ITEM);
+
+        List<String> preferredSuffixes = List.of("_block", "_ingot", "_nugget", "_gem");
+
+        return vars.stream()
+                .min(Comparator
+                        .comparingInt(i -> {
+                            ResourceLocation id = itemRegistry.getKey((Item) i);
+                            if (id == null) return Integer.MAX_VALUE;
+                            String path = id.getPath();
+                            for (int rank = 0; rank < preferredSuffixes.size(); rank++) {
+                                if (path.endsWith(preferredSuffixes.get(rank))) return rank;
+                            }
+                            return preferredSuffixes.size();
+                        })
+                        .thenComparing(i -> {
+                            ResourceLocation id = itemRegistry.getKey((Item) i);
+                            return id != null ? id.toString() : "";
+                        })
+                )
+                .orElseGet(() -> vars.iterator().next());
+    }
+
+    private static List<Set<Item>> stronglyConnectedComponents(Set<Item> nodes, Map<Item, Set<Item>> graph) {
+        // Tarjan's algorithm
+        Map<Item, Integer> index = new HashMap<>();
+        Map<Item, Integer> low = new HashMap<>();
+        Deque<Item> stack = new ArrayDeque<>();
+        Set<Item> onStack = new HashSet<>();
+        List<Set<Item>> sccs = new ArrayList<>();
+        int[] time = {0};
+
+        class Dfs {
+            void run(Item v) {
+                index.put(v, time[0]);
+                low.put(v, time[0]);
+                time[0]++;
+                stack.push(v);
+                onStack.add(v);
+
+                for (Item w : graph.getOrDefault(v, Set.of())) {
+                    if (!nodes.contains(w)) continue;
+                    if (!index.containsKey(w)) {
+                        run(w);
+                        low.put(v, Math.min(low.get(v), low.get(w)));
+                    } else if (onStack.contains(w)) {
+                        low.put(v, Math.min(low.get(v), index.get(w)));
+                    }
+                }
+
+                if (low.get(v).equals(index.get(v))) {
+                    Set<Item> comp = new HashSet<>();
+                    Item x;
+                    do {
+                        x = stack.pop();
+                        onStack.remove(x);
+                        comp.add(x);
+                    } while (x != v);
+                    sccs.add(comp);
+                }
+            }
+        }
+        Dfs dfs = new Dfs();
+        for (Item v : nodes) {
+            if (!index.containsKey(v)) dfs.run(v);
+        }
+        return sccs;
+    }
+
+    private static Item chooseIngredientItem(Ingredient ing) {
+        ItemStack[] options = ing.getItems();
+        if (options.length == 0) return null;
+        Optional<Item> stemMatch = Arrays.stream(options)
+                .map(ItemStack::getItem)
+                .filter(stemItems::contains)
+                .findFirst();
+        return stemMatch.orElse(options[0].getItem());
+    }
+
+    private static void solveSccMasses(
+            Set<Item> scc,
+            Map<Item, List<CraftingRecipe>> outputRecipes,
+            Set<Item> known,
+            MinecraftServer server,
+            double defaultMassAnchor
+    ) {
+        // variables to solve
+        List<Item> vars = new ArrayList<>(scc);
+        Map<Item, Double> x = new HashMap<>();
+        for (Item i : vars) x.put(i, overriddenMasses.getOrDefault(i, defaultMassAnchor));
+
+        // Does SCC have any external known anchor?
+        boolean hasExternalAnchor = false;
+        for (Item r : vars) {
+            for (CraftingRecipe recipe : outputRecipes.getOrDefault(r, List.of())) {
+                boolean usesKnown = false;
+                for (Ingredient ing : recipe.getIngredients()) {
+                    if (ing.isEmpty()) continue;
+                    Item choice = chooseIngredientItem(ing);
+                    if (choice == null) continue;
+                    if (!scc.contains(choice) && (isOverridden(choice) || !autoMasses.contains(choice) || known.contains(choice))) {
+                        usesKnown = true; break;
+                    }
+                }
+                if (usesKnown) { hasExternalAnchor = true; break; }
+            }
+            if (hasExternalAnchor) break;
+        }
+
+        // Gauss–Seidel iteration
+        final int MAX_ITERS = 200;
+        final double EPS = 1e-6;
+        for (int it = 0; it < MAX_ITERS; it++) {
+            double maxDelta = 0.0;
+
+            for (Item r : vars) {
+                List<CraftingRecipe> recs = outputRecipes.getOrDefault(r, List.of());
+                if (recs.isEmpty()) continue;
+
+                List<Double> candidates = new ArrayList<>();
+                for (CraftingRecipe recipe : recs) {
+                    ItemStack out = recipe.getResultItem(server.registryAccess());
+                    int outCount = Math.max(1, out.getCount());
+
+                    double total = 0.0;
+                    boolean valid = true;
+                    for (Ingredient ing : recipe.getIngredients()) {
+                        if (ing.isEmpty()) continue;
+                        Item choice = chooseIngredientItem(ing);
+                        if (choice == null) { valid = false; break; }
+
+                        if (scc.contains(choice)) {
+                            Double mv = x.get(choice);
+                            if (mv == null) { valid = false; break; }
+                            total += mv;
+                        } else {
+                            total += getMassOrDefault(choice);
+                        }
+                    }
+                    if (valid) candidates.add(total / outCount);
+                }
+
+                if (!candidates.isEmpty()) {
+                    double newV = Collections.min(candidates); // keep ratios; no rounding inside loop
+                    double oldV = x.get(r);
+                    x.put(r, newV);
+                    maxDelta = Math.max(maxDelta, Math.abs(newV - oldV));
+                }
+            }
+            if (maxDelta < EPS) break;
+        }
+
+        // If there was no external anchor, scale SCC so pivot matches defaultMassAnchor
+        if (!hasExternalAnchor) {
+            Item pivot = pickPivot(scc, server);
+            double pv = Math.max(1e-9, x.getOrDefault(pivot, defaultMassAnchor));
+            double scale = defaultMassAnchor / pv;
+            for (Item i : vars) {
+                x.put(i, x.get(i) * scale);
+            }
+        }
+
+        // Commit (rounding only at commit time for stability)
+        for (Item i : vars) {
+            double newMass = Math.round(x.get(i));
+            double oldMass = getMassOrDefault(i);
+
+            if (oldMass != newMass && i instanceof BlockItem) {
+                changedItems.add(new ChangedItem(i, oldMass, newMass));
+            }
+            overriddenMasses.put(i, newMass);
+
+            // IMPORTANT: if item is base, it's not auto
+            if (baseItems.contains(i)) {
+                autoMasses.remove(i);
+            } else {
+                autoMasses.add(i);
+            }
+
+            known.add(i);
+        }
     }
 
     private static OptionalDouble resolveRecipeMassUsingKnown(CraftingRecipe recipe, MinecraftServer server, Set<Item> known) {
@@ -337,7 +560,7 @@ public class MassManager {
         RecipeManager manager = server.getRecipeManager();
         Registry<Item> itemRegistry = server.registryAccess().registryOrThrow(Registries.ITEM);
 
-        // Build reverse graph: ingredients -> results
+        // Build reverse graph: ingredient -> results
         for (RecipeHolder<? extends CraftingRecipe> holder : manager.getAllRecipesFor(RecipeType.CRAFTING)) {
             CraftingRecipe recipe = holder.value();
             Item result = recipe.getResultItem(server.registryAccess()).getItem();
@@ -368,31 +591,39 @@ public class MassManager {
         visited.clear();
         Collections.reverse(order);
 
-        // SCC detection and stem selection: items with both dye and non-dye recipes
+        // SCC detection and stem selection
         Set<Item> sccVisited = new HashSet<>();
         for (Item item : order) {
             if (sccVisited.contains(item)) continue;
 
-            // Visit SCC from this root node
             Set<Item> scc = new HashSet<>();
-            dfs2(item, new HashSet<>(), forwardGraph, scc); // local visited!
-
-            sccVisited.addAll(scc); // mark all items in the SCC as globally visited
+            dfs2(item, new HashSet<>(), forwardGraph, scc);
+            sccVisited.addAll(scc);
 
             boolean reachableFromBase = scc.stream().anyMatch(i ->
                     baseItems.contains(i) || isReachableFromBase(i, forwardGraph)
             );
 
             if (reachableFromBase) {
+                // treat as auto
                 autoMasses.add(scc.stream().toList().getLast());
             } else {
-                // Prefer block-like base
-                scc.stream().min(Comparator
-                        .comparing((Item i) -> (i instanceof BlockItem) ? 0 : 1)
-                        .thenComparing(i -> Objects.requireNonNull(itemRegistry.getKey(i)).toString())).ifPresent(baseItems::add);
+                // this SCC is a base
+                Item chosenBase = scc.stream().min(
+                        Comparator
+                                .comparing((Item i) -> (i instanceof BlockItem) ? 0 : 1)
+                                .thenComparing(i -> Objects.requireNonNull(itemRegistry.getKey(i)).toString())
+                ).orElse(null);
+
+                System.out.println(chosenBase);
+
+                if (chosenBase != null) {
+                    baseItems.add(chosenBase);
+                }
             }
         }
 
+        // Detect stems: items with both dye and non-dye recipes
         for (Item item : itemRegistry) {
             List<CraftingRecipe> recipes = manager.getAllRecipesFor(RecipeType.CRAFTING).stream()
                     .map(RecipeHolder::value)
@@ -407,7 +638,7 @@ public class MassManager {
             }
         }
 
-        // Items not craftable at all are base items (leaf nodes)
+        // Items not craftable at all are base items (true leaves)
         Set<Item> craftable = manager.getAllRecipesFor(RecipeType.CRAFTING).stream()
                 .map(r -> r.value().getResultItem(server.registryAccess()).getItem())
                 .collect(Collectors.toSet());
@@ -418,6 +649,7 @@ public class MassManager {
             }
         }
 
+        // Ensure consistency: no autoMasses flagged as base
         for (Item item : baseItems) {
             autoMasses.remove(item);
         }

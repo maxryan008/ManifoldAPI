@@ -19,11 +19,14 @@ import net.minecraft.client.renderer.chunk.SectionCompiler;
 import net.minecraft.client.renderer.chunk.SectionRenderDispatcher;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.SectionPos;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.util.Mth;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.LevelChunkSection;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.VoxelShape;
+import org.jetbrains.annotations.Nullable;
 import org.joml.Matrix4f;
 import org.joml.Quaternionf;
 
@@ -38,6 +41,10 @@ public class ConstructRenderCache {
     private final RenderBuffers buffers = MC.renderBuffers();
     private final HashMap<UUID, CachedConstruct> renderSections = new HashMap<>();
     private final ArrayList<UUID> markedForRemoval = new ArrayList<>();
+
+    private final Map<UUID, ResourceKey<Level>> constructWorld = new HashMap<>();
+    public void setConstructWorld(UUID id, ResourceKey<Level> world) { constructWorld.put(id, world); }
+    public @Nullable ResourceKey<Level> getConstructWorld(UUID id) { return constructWorld.get(id); }
 
     private static void renderShape(
             PoseStack poseStack, VertexConsumer vertexConsumer, VoxelShape voxelShape, double d, double e, double f, float r, float g, float b, float a
@@ -58,6 +65,7 @@ public class ConstructRenderCache {
 
     @SuppressWarnings("DataFlowIssue")
     public void uploadMesh(UUID id, BlockPos origin, ManifoldRenderChunkRegion region) {
+        if (!isCurrentDimension(id)) return;
         List<ManifoldRenderSection> sectionList = new ArrayList<>();
 
         for (ManifoldRenderChunk renderChunk : region.getChunks().values()) {
@@ -158,14 +166,18 @@ public class ConstructRenderCache {
 
         if (!markedForRemoval.isEmpty()) {
             renderSections.keySet().removeAll(markedForRemoval);
+            for (UUID id : markedForRemoval) constructWorld.remove(id);
             markedForRemoval.clear();
         }
-        Collection<CachedConstruct> constructs = renderSections.values();
 
+        Collection<CachedConstruct> constructs = renderSections.values();
         for (CachedConstruct cached : constructs) {
+            if (!isCurrentDimension(cached.id)) continue;
+
             List<ManifoldRenderSection> sectionArray = cached.sections();
             for (ManifoldRenderSection section : sectionArray) {
-                SectionRenderDispatcher.CompiledSection compiled = ((SectionRenderDispatcher_RenderSectionAccessor) section.section()).getCompiled().get();
+                SectionRenderDispatcher.CompiledSection compiled =
+                        ((SectionRenderDispatcher_RenderSectionAccessor) section.section()).getCompiled().get();
 
                 Vec3 interpolatedPos = cached.prevPosition.lerp(cached.currentPosition, deltaTicks);
                 Quaternionf interpolatedRot = new Quaternionf(cached.prevRotation).slerp(cached.currentRotation, deltaTicks);
@@ -175,26 +187,21 @@ public class ConstructRenderCache {
                 stack.pushPose();
                 stack.mulPose(cameraInverseRot);
 
-                // Translate to world pos minus COM
                 stack.translate(interpolatedPos.x - camPos.x, interpolatedPos.y - camPos.y, interpolatedPos.z - camPos.z);
                 stack.mulPose(interpolatedRot);
                 stack.translate(sectionPos.x - com.x, sectionPos.y - com.y, sectionPos.z - com.z);
-
 
                 RenderSystem.enableDepthTest();
                 RenderSystem.enableBlend();
                 for (RenderType type : RenderType.chunkBufferLayers()) {
                     if (!compiled.isEmpty(type)) {
                         VertexBuffer buffer = section.section().getBuffer(type);
-
-                        type.setupRenderState(); // This binds the correct shader and sets projection
+                        type.setupRenderState();
                         Matrix4f poseMatrix = stack.last().pose();
-
                         buffer.bind();
                         ShaderInstance shader = RenderSystem.getShader();
                         buffer.drawWithShader(poseMatrix, RenderSystem.getProjectionMatrix(), shader);
                         VertexBuffer.unbind();
-
                         type.clearRenderState();
                     }
                 }
@@ -210,8 +217,13 @@ public class ConstructRenderCache {
 
         if (ManifoldClient.lastConstructHit != null) {
             ConstructBlockHitResult hitResult = ManifoldClient.lastConstructHit;
-
             CachedConstruct cached = hitResult.getConstruct();
+
+            if (cached == null || !isCurrentDimension(cached.id)) {
+                stack.popPose();
+                return;
+            }
+
             Vec3 interpolatedPosition = cached.prevPosition.lerp(cached.currentPosition, deltaTicks);
             Quaternionf interpolatedRotation = new Quaternionf(cached.prevRotation).slerp(cached.currentRotation, deltaTicks);
             Vec3 com = cached.centerOfMass;
@@ -222,14 +234,7 @@ public class ConstructRenderCache {
             stack.translate(blockOffset.x - com.x, blockOffset.y - com.y, blockOffset.z - com.z);
 
             VertexConsumer consumer = MC.renderBuffers().bufferSource().getBuffer(RenderType.lines());
-            renderShape(
-                    stack,
-                    consumer,
-                    hitResult.getShape(),
-                    0, 0, 0, // Already translated
-                    1.0F, 0.0F, 0.0F, 1.0F
-            );
-
+            renderShape(stack, consumer, hitResult.getShape(), 0, 0, 0, 1F, 0F, 0F, 1F);
             MC.renderBuffers().outlineBufferSource().endOutlineBatch();
         }
 
@@ -242,6 +247,7 @@ public class ConstructRenderCache {
 
     public void markForRemoval(UUID uuid) {
         this.markedForRemoval.add(uuid);
+        constructWorld.remove(uuid);
     }
 
     public record CachedConstruct(
@@ -254,5 +260,11 @@ public class ConstructRenderCache {
             Quaternionf currentRotation,
             Vec3 centerOfMass
     ) {
+    }
+
+    private boolean isCurrentDimension(UUID id) {
+        Level level = MC.level;
+        ResourceKey<Level> key = constructWorld.get(id);
+        return level != null && key != null && level.dimension().equals(key);
     }
 }

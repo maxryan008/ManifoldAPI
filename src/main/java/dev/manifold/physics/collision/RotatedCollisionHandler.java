@@ -2,6 +2,8 @@ package dev.manifold.physics.collision;
 
 import dev.manifold.ConstructManager;
 import dev.manifold.DynamicConstruct;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Matrix3f;
@@ -11,13 +13,13 @@ import java.util.List;
 public class RotatedCollisionHandler {
     private static final double MIN_MOVE = 1e-7;
 
-    public static Vec3 collideWithConstructs(Vec3 entityMovement, AABB entityBoundingBoxWorld) {
+    public static Vec3 collideWithConstructs(ResourceKey<Level> world, Vec3 entityMovement, AABB entityBoundingBoxWorld) {
         if (entityMovement.lengthSqr() < MIN_MOVE * MIN_MOVE) return entityMovement;
 
         Vec3 totalCorrection = entityMovement;
         Vec3 boxCenter = entityBoundingBoxWorld.getCenter();
 
-        List<DynamicConstruct> constructs = ConstructManager.INSTANCE.getNearbyConstructs(boxCenter, 8);
+        List<DynamicConstruct> constructs = ConstructManager.INSTANCE.getNearbyConstructs(world, boxCenter, 8);
 
         for (DynamicConstruct construct : constructs) {
             totalCorrection = collideWithConstruct(totalCorrection, entityBoundingBoxWorld, construct);

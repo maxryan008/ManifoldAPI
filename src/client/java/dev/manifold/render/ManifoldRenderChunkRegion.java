@@ -94,7 +94,7 @@ public class ManifoldRenderChunkRegion implements BlockAndTintGetter, LightChunk
 
         Optional<UUID> uuidOptional = ConstructManager.INSTANCE.getConstructAt(worldPos);
 
-        List<DynamicConstruct> nearbyConstructs = ConstructManager.INSTANCE.getNearbyConstructs(ConstructManager.INSTANCE.getRenderPosFromSim(uuidOptional.get(), worldPos), 2); // 2 chunks radius
+        List<DynamicConstruct> nearbyConstructs = ConstructManager.INSTANCE.getNearbyConstructs(level.dimension(),ConstructManager.INSTANCE.getRenderPosFromSim(uuidOptional.get(), worldPos), 2); // 2 chunks radius
 
         for (DynamicConstruct construct : nearbyConstructs) {
             Vec3 renderPosFromSim = ConstructManager.INSTANCE.getRenderPosFromSim(uuidOptional.get(), worldPos);
@@ -123,7 +123,7 @@ public class ManifoldRenderChunkRegion implements BlockAndTintGetter, LightChunk
 
         // Block light from nearby constructs in render space
         int blockLight = 0;
-        List<DynamicConstruct> nearby = ConstructManager.INSTANCE.getNearbyConstructs(Vec3.atCenterOf(blockPos), 2);
+        List<DynamicConstruct> nearby = ConstructManager.INSTANCE.getNearbyConstructs(level.dimension(),Vec3.atCenterOf(blockPos), 2);
         for (DynamicConstruct construct : nearby) {
             BlockPos simPos = ConstructManager.INSTANCE.getSimPosFromRender(construct.getId(), Vec3.atCenterOf(blockPos));
             int val = ConstructManager.INSTANCE.getSimDimension()

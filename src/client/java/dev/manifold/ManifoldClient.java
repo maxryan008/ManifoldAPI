@@ -98,6 +98,9 @@ public class ManifoldClient implements ClientModInitializer {
 
             // Skip constructs that have been removed to prevent a crash
             if (!ConstructManager.INSTANCE.hasConstruct(uuid)) continue;
+            var worldKey = renderer.getConstructWorld(uuid);
+            Level clientLevel = Minecraft.getInstance().level;
+            if (worldKey == null || clientLevel == null || !clientLevel.dimension().equals(worldKey)) continue;
 
             // Compute inverse rotation and position
             Vec3 interpolatedConstructPosition = construct.prevPosition().lerp(construct.currentPosition(), alpha);
@@ -249,6 +252,13 @@ public class ManifoldClient implements ClientModInitializer {
     private void handleConstructSectionData(ConstructSectionDataS2CPacket packet) {
         if (renderer == null) return;
 
+        Level clientLevel = Minecraft.getInstance().level;
+        if (clientLevel == null || !clientLevel.dimension().equals(packet.worldKey())) {
+            return;
+        }
+
+        renderer.setConstructWorld(packet.constructId(), packet.worldKey());
+
         List<CompoundTag> chunkNbtList = packet.chunkNbtList();
         int countX = packet.chunkSizeX();
         int countZ = packet.chunkSizeZ();
@@ -308,6 +318,10 @@ public class ManifoldClient implements ClientModInitializer {
     }
 
     private void handleRemoveConstruct(RemoveConstructS2CPacket packet) {
+        Level level = Minecraft.getInstance().level;
+        if (level == null) return;
+        var worldKey = renderer.getConstructWorld(packet.constructId());
+        if (worldKey != null && !level.dimension().equals(worldKey)) return;
         renderer.markForRemoval(packet.constructId());
     }
 }
