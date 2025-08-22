@@ -47,21 +47,22 @@ public class ConstructManager {
     private final ServerLevel simDimension;
     private final Map<UUID, DynamicConstruct> constructs = new HashMap<>();
     private final Map<Vector2i, UUID> regionOwners = new HashMap<>();
-    private final ConstructCollisionManager collisionManager = new ConstructCollisionManager();
 
     public ConstructManager(ServerLevel simDimension) {
         this.simDimension = simDimension;
-    }
-
-    public ConstructCollisionManager getCollisionManager() {
-        return collisionManager;
     }
 
     public void loadFromSave(ConstructSaveData saveData) {
         for (DynamicConstruct construct : saveData.getConstructs().values()) {
             constructs.put(construct.getId(), construct);
             regionOwners.put(getRegionIndex(construct.getSimOrigin()), construct.getId());
-            collisionManager.updateCollision(construct.getId(), simDimension, construct.getSimOrigin(), construct.getNegativeBounds(), construct.getPositiveBounds());
+            ConstructCollisionManager.rebuild(
+                    construct.getId(),
+                    simDimension,
+                    construct.getSimOrigin(),
+                    construct.getNegativeBounds(),
+                    construct.getPositiveBounds()
+            );
         }
     }
 
@@ -80,7 +81,13 @@ public class ConstructManager {
 
         constructs.put(uuid, construct);
         regionOwners.put(region, uuid);
-        collisionManager.updateCollision(uuid, simDimension, construct.getSimOrigin(), construct.getNegativeBounds(), construct.getPositiveBounds());
+        ConstructCollisionManager.rebuild(
+                uuid,
+                simDimension,
+                construct.getSimOrigin(),
+                construct.getNegativeBounds(),
+                construct.getPositiveBounds()
+        );
         return uuid;
     }
 
@@ -89,7 +96,7 @@ public class ConstructManager {
         if (construct != null) {
             clearConstructArea(construct);
             regionOwners.remove(getRegionIndex(construct.getSimOrigin()));
-            collisionManager.remove(id);
+            ConstructCollisionManager.clear(id);
 
             // notify only players in the construct's render dimension
             for (ServerPlayer player : simDimension.getServer().getPlayerList().getPlayers()) {
@@ -259,7 +266,10 @@ public class ConstructManager {
         construct.setNegativeBounds(new BlockPos(newNegX, newNegY, newNegZ));
         construct.setPositiveBounds(new BlockPos(newPosX, newPosY, newPosZ));
 
-        collisionManager.updateCollision(id, simDimension, construct.getSimOrigin(), construct.getNegativeBounds(), construct.getPositiveBounds());
+        ConstructCollisionManager.rebuild(
+                id, simDimension, construct.getSimOrigin(),
+                construct.getNegativeBounds(), construct.getPositiveBounds()
+        );
     }
 
     public void tick(MinecraftServer server) {
@@ -633,8 +643,7 @@ public class ConstructManager {
         construct.setNegativeBounds(new BlockPos(minX - 1, minY - 1, minZ - 1));
         construct.setPositiveBounds(new BlockPos(maxX + 1, maxY + 1, maxZ + 1));
 
-        // Optional: update collision
-        ConstructManager.INSTANCE.getCollisionManager().updateCollision(
+        ConstructCollisionManager.rebuild(
                 construct.getId(),
                 ConstructManager.INSTANCE.getSimDimension(),
                 construct.getSimOrigin(),
