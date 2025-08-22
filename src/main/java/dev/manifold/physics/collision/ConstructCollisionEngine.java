@@ -72,7 +72,6 @@ public final class ConstructCollisionEngine {
         Optional<ConstructCollisionManager.Planes> opt = ConstructCollisionManager.get(construct.getId());
         if (opt.isEmpty()) return desiredLocal;
         ConstructCollisionManager.Planes planes = opt.get();
-
         // 1) Pre-advance to the requested position
         AABB moved = startBBLocal;
 
