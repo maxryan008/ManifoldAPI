@@ -21,6 +21,7 @@ import java.util.Optional;
 public final class ConstructCollisionEngine {
     private static final double SKIN = 1e-6;
     private static final double LEDGE_EPS = 1e-3; // lets you leave platform edges without snagging
+    private static final int GRID = ConstructCollisionManager.GRID; // 16
 
     public static Vec3 resolveCollisions(
             Vec3 vanillaResolved,
@@ -154,25 +155,29 @@ public final class ConstructCollisionEngine {
         double pushUp = 0.0;  // +Y
         double pushDn = 0.0;  // -Y
 
-        // UP (depth = Y+1), in-plane (u,v)=(X,Z)
         for (CollisionPlane.Rect r : planes.rects(Direction.UP)) {
-            final double y = r.depth;
-            if (y <= bb.minY || y >= bb.maxY - yDelta) continue;
-            if (!overlap1D(bb.minX, bb.maxX, r.u0, r.u1)) continue;
-            if (!overlap1D(bb.minZ, bb.maxZ, r.v0, r.v1)) continue;
+            final double y = r.depth / (double)GRID;
+            final double u0 = r.u0 / (double)GRID, u1 = r.u1 / (double)GRID;
+            final double v0 = r.v0 / (double)GRID, v1 = r.v1 / (double)GRID;
 
-            double candUp = (y - bb.minY) + SKIN;  // > 0
-            double candDn = (y - (bb.maxY + yDelta)) - SKIN;  // < 0
+            if (y <= bb.minY || y >= bb.maxY - yDelta) continue;
+            if (!overlap1D(bb.minX, bb.maxX, u0, u1)) continue;
+            if (!overlap1D(bb.minZ, bb.maxZ, v0, v1)) continue;
+
+            double candUp = (y - bb.minY) + SKIN;
+            double candDn = (y - (bb.maxY + yDelta)) - SKIN;
             if (candUp > 0.0 && (pushUp == 0.0 || candUp < pushUp)) pushUp = candUp;
             if (candDn < 0.0 && (pushDn == 0.0 || candDn > pushDn)) pushDn = candDn;
         }
 
-        // DOWN (depth = Y), in-plane (u,v)=(X,Z)
         for (CollisionPlane.Rect r : planes.rects(Direction.DOWN)) {
-            final double y = r.depth;
+            final double y = r.depth / (double)GRID;
+            final double u0 = r.u0 / (double)GRID, u1 = r.u1 / (double)GRID;
+            final double v0 = r.v0 / (double)GRID, v1 = r.v1 / (double)GRID;
+
             if (y <= bb.minY - yDelta || y >= bb.maxY) continue;
-            if (!overlap1D(bb.minX, bb.maxX, r.u0, r.u1)) continue;
-            if (!overlap1D(bb.minZ, bb.maxZ, r.v0, r.v1)) continue;
+            if (!overlap1D(bb.minX, bb.maxX, u0, u1)) continue;
+            if (!overlap1D(bb.minZ, bb.maxZ, v0, v1)) continue;
 
             double candUp = (y - (bb.minY + yDelta)) + SKIN;
             double candDn = (y - bb.maxY) - SKIN;
@@ -189,25 +194,29 @@ public final class ConstructCollisionEngine {
         double pushLt = 0.0;  // -X
         final double yMinForSide = useLedgeEps ? (bb.minY + LEDGE_EPS) : bb.minY;
 
-        // EAST (depth=X+1), in-plane (u,v)=(Z,Y)
         for (CollisionPlane.Rect r : planes.rects(Direction.EAST)) {
-            final double x = r.depth;
-            if (x <= bb.minX || x >= bb.maxX - xDelta) continue;
-            if (!overlap1D(bb.minZ, bb.maxZ, r.u0, r.u1)) continue;
-            if (!overlap1D(yMinForSide, bb.maxY, r.v0, r.v1)) continue; // << ledge slip here
+            final double x = r.depth / (double)GRID;
+            final double u0 = r.u0 / (double)GRID, u1 = r.u1 / (double)GRID;
+            final double v0 = r.v0 / (double)GRID, v1 = r.v1 / (double)GRID;
 
-            double candRt = (x - bb.minX) + SKIN;  // > 0
-            double candLt = (x - (bb.maxX + xDelta)) - SKIN;  // < 0
+            if (x <= bb.minX || x >= bb.maxX - xDelta) continue;
+            if (!overlap1D(bb.minZ, bb.maxZ, u0, u1)) continue;
+            if (!overlap1D(yMinForSide, bb.maxY, v0, v1)) continue;
+
+            double candRt = (x - bb.minX) + SKIN;
+            double candLt = (x - (bb.maxX + xDelta)) - SKIN;
             if (candRt > 0.0 && (pushRt == 0.0 || candRt < pushRt)) pushRt = candRt;
             if (candLt < 0.0 && (pushLt == 0.0 || candLt > pushLt)) pushLt = candLt;
         }
 
-        // WEST (depth=X), in-plane (u,v)=(Z,Y)
         for (CollisionPlane.Rect r : planes.rects(Direction.WEST)) {
-            final double x = r.depth;
+            final double x = r.depth / (double)GRID;
+            final double u0 = r.u0 / (double)GRID, u1 = r.u1 / (double)GRID;
+            final double v0 = r.v0 / (double)GRID, v1 = r.v1 / (double)GRID;
+
             if (x <= bb.minX - xDelta || x >= bb.maxX) continue;
-            if (!overlap1D(bb.minZ, bb.maxZ, r.u0, r.u1)) continue;
-            if (!overlap1D(yMinForSide, bb.maxY, r.v0, r.v1)) continue; // << ledge slip here
+            if (!overlap1D(bb.minZ, bb.maxZ, u0, u1)) continue;
+            if (!overlap1D(yMinForSide, bb.maxY, v0, v1)) continue;
 
             double candRt = (x - (bb.minX + xDelta)) + SKIN;
             double candLt = (x - bb.maxX) - SKIN;
@@ -224,25 +233,29 @@ public final class ConstructCollisionEngine {
         double pushBak = 0.0; // -Z
         final double yMinForSide = useLedgeEps ? (bb.minY + LEDGE_EPS) : bb.minY;
 
-        // SOUTH (depth=Z+1), in-plane (u,v)=(X,Y)
         for (CollisionPlane.Rect r : planes.rects(Direction.SOUTH)) {
-            final double z = r.depth;
-            if (z <= bb.minZ || z >= bb.maxZ - zDelta) continue;
-            if (!overlap1D(bb.minX, bb.maxX, r.u0, r.u1)) continue;
-            if (!overlap1D(yMinForSide, bb.maxY, r.v0, r.v1)) continue; // << ledge slip here
+            final double z = r.depth / (double)GRID;
+            final double u0 = r.u0 / (double)GRID, u1 = r.u1 / (double)GRID;
+            final double v0 = r.v0 / (double)GRID, v1 = r.v1 / (double)GRID;
 
-            double candF = (z - bb.minZ) + SKIN;  // > 0
-            double candB = (z - (bb.maxZ + zDelta)) - SKIN;  // < 0
+            if (z <= bb.minZ || z >= bb.maxZ - zDelta) continue;
+            if (!overlap1D(bb.minX, bb.maxX, u0, u1)) continue;
+            if (!overlap1D(yMinForSide, bb.maxY, v0, v1)) continue;
+
+            double candF = (z - bb.minZ) + SKIN;
+            double candB = (z - (bb.maxZ + zDelta)) - SKIN;
             if (candF > 0.0 && (pushFwd == 0.0 || candF < pushFwd)) pushFwd = candF;
             if (candB < 0.0 && (pushBak == 0.0 || candB > pushBak)) pushBak = candB;
         }
 
-        // NORTH (depth=Z), in-plane (u,v)=(X,Y)
         for (CollisionPlane.Rect r : planes.rects(Direction.NORTH)) {
-            final double z = r.depth;
+            final double z = r.depth / (double)GRID;
+            final double u0 = r.u0 / (double)GRID, u1 = r.u1 / (double)GRID;
+            final double v0 = r.v0 / (double)GRID, v1 = r.v1 / (double)GRID;
+
             if (z <= bb.minZ - zDelta || z >= bb.maxZ) continue;
-            if (!overlap1D(bb.minX, bb.maxX, r.u0, r.u1)) continue;
-            if (!overlap1D(yMinForSide, bb.maxY, r.v0, r.v1)) continue; // << ledge slip here
+            if (!overlap1D(bb.minX, bb.maxX, u0, u1)) continue;
+            if (!overlap1D(yMinForSide, bb.maxY, v0, v1)) continue;
 
             double candF = (z - (bb.minZ + zDelta)) + SKIN;
             double candB = (z - bb.maxZ) - SKIN;
@@ -256,7 +269,7 @@ public final class ConstructCollisionEngine {
     /* -------- small utilities (unchanged) -------- */
 
     /** 1D interval overlap, treating rects as half-open [b0,b1) and the AABB as closed. */
-    private static boolean overlap1D(double a0, double a1, int b0, int b1) {
+    private static boolean overlap1D(double a0, double a1, double b0, double b1) {
         return a1 > b0 && b1 > a0;
     }
 

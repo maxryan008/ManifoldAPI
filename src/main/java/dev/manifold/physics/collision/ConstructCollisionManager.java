@@ -4,16 +4,25 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.shapes.VoxelShape;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Stores six greedy-meshed collision planes per construct.
- * All data are in construct-local coordinates (integers).
+ * Builds six greedy-meshed planes using each block's VoxelShape.
+ * All coordinates are in sub-voxels (1 unit = 1/16 block).
+ *
+ * Coordinate conventions per plane:
+ *  - UP/DOWN:    u = X*16.., v = Z*16.., depth = Y*16 (+0..16 inside the block)
+ *  - NORTH/SOUTH: u = X*16.., v = Y*16.., depth = Z*16 (+0..16)
+ *  - WEST/EAST:   u = Z*16.., v = Y*16.., depth = X*16 (+0..16)
  */
 public final class ConstructCollisionManager {
+
+    public static final int GRID = 16;           // sub-voxels per block per axis
+    private static final double EPS = 1e-7;      // geometric epsilon for overlaps
 
     public record Planes(
             CollisionPlane up,
@@ -23,12 +32,10 @@ public final class ConstructCollisionManager {
             CollisionPlane west,
             CollisionPlane east
     ) {
-        public List<CollisionPlane> all() {
-            return List.of(up, down, north, south, west, east);
-        }
+        public List<CollisionPlane> all() { return List.of(up, down, north, south, west, east); }
 
-        public CollisionPlane faces(Direction direction) {
-            return switch (direction) {
+        public CollisionPlane faces(Direction d) {
+            return switch (d) {
                 case DOWN -> down;
                 case UP -> up;
                 case NORTH -> north;
@@ -38,8 +45,8 @@ public final class ConstructCollisionManager {
             };
         }
 
-        public List<CollisionPlane.Rect> rects(Direction direction) {
-            return switch (direction) {
+        public List<CollisionPlane.Rect> rects(Direction d) {
+            return switch (d) {
                 case DOWN -> down.rects;
                 case UP -> up.rects;
                 case NORTH -> north.rects;
@@ -51,18 +58,14 @@ public final class ConstructCollisionManager {
     }
 
     private static final Map<UUID, Planes> BY_ID = new ConcurrentHashMap<>();
-
     private ConstructCollisionManager() {}
 
     public static void clear(UUID id) { BY_ID.remove(id); }
-
-    public static Optional<Planes> get(UUID id) {
-        return Optional.ofNullable(BY_ID.get(id));
-    }
+    public static Optional<Planes> get(UUID id) { return Optional.ofNullable(BY_ID.get(id)); }
 
     /**
-     * Rebuild all 6 planes from the block region [min..max] around origin (construct-local).
-     * origin, min, max are block-aligned in the simulation dimension.
+     * Rebuild all 6 planes from the block region [min..max] around origin (block-aligned).
+     * Emits rectangles in 1/16th units.
      */
     public static void rebuild(UUID id, Level level, BlockPos origin, BlockPos min, BlockPos max) {
         final CollisionPlane up    = new CollisionPlane(CollisionPlane.Face.UP);
@@ -72,199 +75,324 @@ public final class ConstructCollisionManager {
         final CollisionPlane west  = new CollisionPlane(CollisionPlane.Face.WEST);
         final CollisionPlane east  = new CollisionPlane(CollisionPlane.Face.EAST);
 
-        // —— UP/DOWN: iterate all (x,z), check exposed faces per y, mesh per depth slice
-        meshHorizontalPlane(level, origin, min, max, /*up=*/true,  up);
-        meshHorizontalPlane(level, origin, min, max, /*up=*/false, down);
-
-        // —— NORTH/SOUTH: iterate (x,y) per z slice
-        meshZPlane(level, origin, min, max, /*south=*/false, north); // Z face at z
-        meshZPlane(level, origin, min, max, /*south=*/true,  south); // Z+1
-
-        // —— WEST/EAST: iterate (z,y) per x slice
-        meshXPlane(level, origin, min, max, /*east=*/false, west);   // X face at x
-        meshXPlane(level, origin, min, max, /*east=*/true,  east);   // X+1
+        meshHorizontal(level, origin, min, max, true,  up);
+        meshHorizontal(level, origin, min, max, false, down);
+        meshZ(level, origin, min, max, false, north);
+        meshZ(level, origin, min, max, true,  south);
+        meshX(level, origin, min, max, false, west);
+        meshX(level, origin, min, max, true,  east);
 
         BY_ID.put(id, new Planes(up, down, north, south, west, east));
     }
 
-    // -----------------------------------------------------------------------------------------
-    // Building slices & greedy meshing
-    // -----------------------------------------------------------------------------------------
+    /* ---------------------------- Meshing per plane ---------------------------- */
 
-    private static void meshHorizontalPlane(Level level, BlockPos origin, BlockPos min, BlockPos max, boolean up, CollisionPlane out) {
-        final int x0 = min.getX(), x1 = max.getX();
-        final int y0 = min.getY(), y1 = max.getY();
-        final int z0 = min.getZ(), z1 = max.getZ();
+    private static void meshHorizontal(Level level, BlockPos origin, BlockPos min, BlockPos max, boolean up, CollisionPlane out) {
+        // plane grid (u, v) spans X and Z in sub-voxels
+        final int u0 = min.getX() * GRID, u1 = (max.getX() + 1) * GRID;
+        final int v0 = min.getZ() * GRID, v1 = (max.getZ() + 1) * GRID;
+        final int U = u1 - u0, V = v1 - v0;
 
-        final int U = x1 - x0 + 1;
-        final int V = z1 - z0 + 1;
+        // We'll process each Y slice independently, building a boolean mask of exposed cells at depth.
+        for (int y = min.getY(); y <= max.getY(); y++) {
+            // depth (in sub-voxels) for this horizontal plane inside the block
+            // UP  : faces are at y + localMaxY
+            // DOWN: faces are at y + localMinY
+            // We'll rasterize coverage for all blocks on this Y.
+            Raster ras = new Raster(U, V);
+            int depthSentinel = Integer.MIN_VALUE; // we'll push rects at their exact depth later
 
-        // For each Y layer, build a u×v grid of exposed faces, greedy-mesh to rectangles.
-        for (int y = y0; y <= y1; y++) {
-            // depth coordinate on the plane (see class doc)
-            final int depth = up ? y + 1 : y;
+            for (int x = min.getX(); x <= max.getX(); x++) {
+                for (int z = min.getZ(); z <= max.getZ(); z++) {
+                    BlockPos pos = origin.offset(x, y, z);
+                    BlockState state = level.getBlockState(pos);
+                    VoxelShape shape = state.getCollisionShape(level, pos);
+                    if (shape.isEmpty()) continue;
 
-            // grid[u][v] = friction or NaN if no face here
-            float[][] grid = new float[U][V];
-            for (int u = 0; u < U; u++) Arrays.fill(grid[u], Float.NaN);
+                    // neighbor above/below for occlusion
+                    BlockPos npos = origin.offset(x, y + (up ? 1 : -1), z);
+                    VoxelShape neigh = level.getBlockState(npos).getCollisionShape(level, npos);
 
-            for (int x = x0; x <= x1; x++) {
-                for (int z = z0; z <= z1; z++) {
-                    BlockPos b = origin.offset(x, y, z);
-                    BlockPos n = origin.offset(x, y + (up ? 1 : -1), z);
+                    // For each AABB in the shape
+                    for (AABB aabb : shape.toAabbs()) {
+                        // sub-voxel local bounds
+                        int lx0 = floorSV(aabb.minX), lx1 = ceilSV(aabb.maxX);
+                        int lz0 = floorSV(aabb.minZ), lz1 = ceilSV(aabb.maxZ);
+                        int ly = (up ? ceilSV(aabb.maxY) : floorSV(aabb.minY));
 
-                    if (hasSolidCollision(level, b) && isAiry(level, n)) {
-                        float mu = friction(level, b);
-                        grid[x - x0][z - z0] = mu;
+                        // World sub-voxel coords in plane space
+                        int uBeg = x * GRID + lx0 - u0, uEnd = x * GRID + lx1 - u0;
+                        int vBeg = z * GRID + lz0 - v0, vEnd = z * GRID + lz1 - v0;
+                        int depth = y * GRID + ly;
+
+                        // Occlusion: mark coverage from neighbor that touches this plane,
+                        // then we add our coverage and subtract occluded cells.
+                        ras.ensureDepth(depth);
+
+                        // Rasterize our face coverage first into a temp mask
+                        ras.fillTemp(uBeg, vBeg, uEnd, vEnd);
+
+                        // Cull cells where neighbor occupies the touching opposite face
+                        if (!neigh.isEmpty()) {
+                            for (AABB nb : neigh.toAabbs()) {
+                                // neighbor touching if its minY (when up) or maxY (when down) equals our plane depth
+                                int nLy = (up ? floorSV(nb.minY) : ceilSV(nb.maxY));
+                                int nDepth = (y + (up ? 1 : -1)) * GRID + nLy;
+                                if (nDepth != depth) continue;
+
+                                int nu0 = x * GRID + floorSV(nb.minX) - u0;
+                                int nu1 = x * GRID + ceilSV(nb.maxX) - u0;
+                                int nv0 = z * GRID + floorSV(nb.minZ) - v0;
+                                int nv1 = z * GRID + ceilSV(nb.maxZ) - v0;
+                                ras.cullTemp(nu0, nv0, nu1, nv1);
+                            }
+                        }
+
+                        ras.commitTemp(depth);
+                        depthSentinel = depth; // any valid depth this slice used
                     }
                 }
             }
 
-            greedyMesh2D(grid, (u0, v0, u1, v1, mu) -> {
-                // convert back to construct-local coords
-                int U0 = x0 + u0, V0 = z0 + v0, U1 = x0 + u1, V1 = z0 + v1;
-                out.add(new CollisionPlane.Rect(U0, V0, U1, V1, depth, mu));
+            // Greedy mesh for every depth we touched this y-slice
+            ras.greedy((du0, dv0, du1, dv1, d) -> {
+                // convert back to sub-voxel world coords
+                int U0 = u0 + du0, V0 = v0 + dv0, U1 = u0 + du1, V1 = v0 + dv1;
+                out.add(new CollisionPlane.Rect(U0, V0, U1, V1, d, frictionDefault())); // friction per-block is optional here
             });
         }
     }
 
-    private static void meshZPlane(Level level, BlockPos origin, BlockPos min, BlockPos max, boolean south, CollisionPlane out) {
-        final int x0 = min.getX(), x1 = max.getX();
-        final int y0 = min.getY(), y1 = max.getY();
-        final int z0 = min.getZ(), z1 = max.getZ();
+    private static void meshZ(Level level, BlockPos origin, BlockPos min, BlockPos max, boolean south, CollisionPlane out) {
+        // plane grid (u, v) spans X and Y in sub-voxels; depth is Z in sub-voxels
+        final int u0 = min.getX() * GRID, u1 = (max.getX() + 1) * GRID;
+        final int v0 = min.getY() * GRID, v1 = (max.getY() + 1) * GRID;
+        final int U = u1 - u0, V = v1 - v0;
 
-        final int U = x1 - x0 + 1;
-        final int V = y1 - y0 + 1;
+        for (int z = min.getZ(); z <= max.getZ(); z++) {
+            Raster ras = new Raster(U, V);
 
-        for (int z = z0; z <= z1; z++) {
-            final int depth = south ? z + 1 : z;
+            for (int x = min.getX(); x <= max.getX(); x++) {
+                for (int y = min.getY(); y <= max.getY(); y++) {
+                    BlockPos pos = origin.offset(x, y, z);
+                    BlockState state = level.getBlockState(pos);
+                    VoxelShape shape = state.getCollisionShape(level, pos);
+                    if (shape.isEmpty()) continue;
 
-            float[][] grid = new float[U][V];
-            for (int u = 0; u < U; u++) Arrays.fill(grid[u], Float.NaN);
+                    BlockPos npos = origin.offset(x, y, z + (south ? 1 : -1));
+                    VoxelShape neigh = level.getBlockState(npos).getCollisionShape(level, npos);
 
-            for (int x = x0; x <= x1; x++) {
-                for (int y = y0; y <= y1; y++) {
-                    BlockPos b = origin.offset(x, y, z);
-                    BlockPos n = origin.offset(x, y, z + (south ? 1 : -1));
+                    for (AABB aabb : shape.toAabbs()) {
+                        int lx0 = floorSV(aabb.minX), lx1 = ceilSV(aabb.maxX);
+                        int ly0 = floorSV(aabb.minY), ly1 = ceilSV(aabb.maxY);
+                        int lz = (south ? ceilSV(aabb.maxZ) : floorSV(aabb.minZ));
 
-                    if (hasSolidCollision(level, b) && isAiry(level, n)) {
-                        float mu = friction(level, b);
-                        grid[x - x0][y - y0] = mu;
+                        int uBeg = x * GRID + lx0 - u0, uEnd = x * GRID + lx1 - u0;
+                        int vBeg = y * GRID + ly0 - v0, vEnd = y * GRID + ly1 - v0;
+                        int depth = z * GRID + lz;
+
+                        ras.ensureDepth(depth);
+                        ras.fillTemp(uBeg, vBeg, uEnd, vEnd);
+
+                        if (!neigh.isEmpty()) {
+                            for (AABB nb : neigh.toAabbs()) {
+                                int nLz = (south ? floorSV(nb.minZ) : ceilSV(nb.maxZ));
+                                int nDepth = (z + (south ? 1 : -1)) * GRID + nLz;
+                                if (nDepth != depth) continue;
+
+                                int nu0 = x * GRID + floorSV(nb.minX) - u0;
+                                int nu1 = x * GRID + ceilSV(nb.maxX) - u0;
+                                int nv0 = y * GRID + floorSV(nb.minY) - v0;
+                                int nv1 = y * GRID + ceilSV(nb.maxY) - v0;
+                                ras.cullTemp(nu0, nv0, nu1, nv1);
+                            }
+                        }
+
+                        ras.commitTemp(depth);
                     }
                 }
             }
 
-            greedyMesh2D(grid, (u0, v0, u1, v1, mu) -> {
-                int U0 = x0 + u0, V0 = y0 + v0, U1 = x0 + u1, V1 = y0 + v1;
-                out.add(new CollisionPlane.Rect(U0, V0, U1, V1, depth, mu));
+            ras.greedy((du0, dv0, du1, dv1, d) -> {
+                int U0 = u0 + du0, V0 = v0 + dv0, U1 = u0 + du1, V1 = v0 + dv1;
+                out.add(new CollisionPlane.Rect(U0, V0, U1, V1, d, frictionDefault()));
             });
         }
     }
 
-    private static void meshXPlane(Level level, BlockPos origin, BlockPos min, BlockPos max, boolean east, CollisionPlane out) {
-        final int x0 = min.getX(), x1 = max.getX();
-        final int y0 = min.getY(), y1 = max.getY();
-        final int z0 = min.getZ(), z1 = max.getZ();
+    private static void meshX(Level level, BlockPos origin, BlockPos min, BlockPos max, boolean east, CollisionPlane out) {
+        // plane grid (u, v) spans Z and Y in sub-voxels; depth is X in sub-voxels
+        final int u0 = min.getZ() * GRID, u1 = (max.getZ() + 1) * GRID;
+        final int v0 = min.getY() * GRID, v1 = (max.getY() + 1) * GRID;
+        final int U = u1 - u0, V = v1 - v0;
 
-        final int U = z1 - z0 + 1;
-        final int V = y1 - y0 + 1;
+        for (int x = min.getX(); x <= max.getX(); x++) {
+            Raster ras = new Raster(U, V);
 
-        for (int x = x0; x <= x1; x++) {
-            final int depth = east ? x + 1 : x;
+            for (int z = min.getZ(); z <= max.getZ(); z++) {
+                for (int y = min.getY(); y <= max.getY(); y++) {
+                    BlockPos pos = origin.offset(x, y, z);
+                    BlockState state = level.getBlockState(pos);
+                    VoxelShape shape = state.getCollisionShape(level, pos);
+                    if (shape.isEmpty()) continue;
 
-            float[][] grid = new float[U][V];
-            for (int u = 0; u < U; u++) Arrays.fill(grid[u], Float.NaN);
+                    BlockPos npos = origin.offset(x + (east ? 1 : -1), y, z);
+                    VoxelShape neigh = level.getBlockState(npos).getCollisionShape(level, npos);
 
-            for (int z = z0; z <= z1; z++) {
-                for (int y = y0; y <= y1; y++) {
-                    BlockPos b = origin.offset(x, y, z);
-                    BlockPos n = origin.offset(x + (east ? 1 : -1), y, z);
+                    for (AABB aabb : shape.toAabbs()) {
+                        int lz0 = floorSV(aabb.minZ), lz1 = ceilSV(aabb.maxZ);
+                        int ly0 = floorSV(aabb.minY), ly1 = ceilSV(aabb.maxY);
+                        int lx = (east ? ceilSV(aabb.maxX) : floorSV(aabb.minX));
 
-                    if (hasSolidCollision(level, b) && isAiry(level, n)) {
-                        float mu = friction(level, b);
-                        grid[z - z0][y - y0] = mu;
+                        int uBeg = z * GRID + lz0 - u0, uEnd = z * GRID + lz1 - u0;
+                        int vBeg = y * GRID + ly0 - v0, vEnd = y * GRID + ly1 - v0;
+                        int depth = x * GRID + lx;
+
+                        ras.ensureDepth(depth);
+                        ras.fillTemp(uBeg, vBeg, uEnd, vEnd);
+
+                        if (!neigh.isEmpty()) {
+                            for (AABB nb : neigh.toAabbs()) {
+                                int nLx = (east ? floorSV(nb.minX) : ceilSV(nb.maxX));
+                                int nDepth = (x + (east ? 1 : -1)) * GRID + nLx;
+                                if (nDepth != depth) continue;
+
+                                int nu0 = z * GRID + floorSV(nb.minZ) - u0;
+                                int nu1 = z * GRID + ceilSV(nb.maxZ) - u0;
+                                int nv0 = y * GRID + floorSV(nb.minY) - v0;
+                                int nv1 = y * GRID + ceilSV(nb.maxY) - v0;
+                                ras.cullTemp(nu0, nv0, nu1, nv1);
+                            }
+                        }
+
+                        ras.commitTemp(depth);
                     }
                 }
             }
 
-            greedyMesh2D(grid, (u0, v0, u1, v1, mu) -> {
-                int U0 = z0 + u0, V0 = y0 + v0, U1 = z0 + u1, V1 = y0 + v1;
-                out.add(new CollisionPlane.Rect(U0, V0, U1, V1, depth, mu));
+            ras.greedy((du0, dv0, du1, dv1, d) -> {
+                int U0 = u0 + du0, V0 = v0 + dv0, U1 = u0 + du1, V1 = v0 + dv1;
+                out.add(new CollisionPlane.Rect(U0, V0, U1, V1, d, frictionDefault()));
             });
         }
     }
 
-    // -----------------------------------------------------------------------------------------
-    // Helpers
-    // -----------------------------------------------------------------------------------------
+    /* ---------------------------- Helpers ---------------------------- */
 
-    private static boolean hasSolidCollision(Level level, BlockPos pos) {
-        BlockState s = level.getBlockState(pos);
-        if (s.isAir()) return false;
-        VoxelShape shape = s.getCollisionShape(level, pos);
-        return !shape.isEmpty();
+    private static int floorSV(double v) {             // world->subvoxel floor
+        return (int)Math.floor(v * GRID + EPS);
+    }
+    private static int ceilSV(double v) {              // world->subvoxel ceil
+        return (int)Math.ceil(v * GRID - EPS);
     }
 
-    private static boolean isAiry(Level level, BlockPos pos) {
-        BlockState s = level.getBlockState(pos);
-        if (s.isAir()) return true;
-        VoxelShape shape = s.getCollisionShape(level, pos);
-        return shape.isEmpty();
-    }
+    private static float frictionDefault() { return 0.6f; }
 
-    private static float friction(Level level, BlockPos pos) {
-        try {
-            BlockState s = level.getBlockState(pos);
-            // If you want to refine later, replace with the exact friction API you use in your mod.
-            return s.getBlock().getFriction(); // fallback; adjust signature for your MC version if needed
-        } catch (Throwable t) {
-            return 0.6f; // vanilla-ish default
+    /**
+     * Light-weight raster collector for many depths per slice.
+     * We build per-depth boolean masks by using a temp bitmap + commit.
+     */
+    private static final class Raster {
+        final int U, V;
+        // depth -> mask
+        final Map<Integer, boolean[]> layers = new HashMap<>();
+        boolean[] temp; // temp coverage for current rect
+        boolean[] tempCull; // temp cull mask (reuse array)
+        int tempU0, tempV0, tempU1, tempV1;
+
+        Raster(int U, int V) {
+            this.U = U; this.V = V;
+            this.temp = new boolean[U * V];
+            this.tempCull = new boolean[U * V];
         }
-    }
 
-    // Greedy meshing for a 2D grid of floats where NaN means "no face".
-    private static void greedyMesh2D(float[][] grid, RectConsumer out) {
-        final int U = grid.length;
-        if (U == 0) return;
-        final int V = grid[0].length;
+        void ensureDepth(int depth) {
+            layers.computeIfAbsent(depth, d -> new boolean[U * V]);
+        }
 
-        boolean[][] used = new boolean[U][V];
-        final float EPS = 1e-6f;
-
-        for (int u = 0; u < U; u++) {
-            for (int v = 0; v < V; v++) {
-                if (used[u][v]) continue;
-                float mu = grid[u][v];
-                if (Float.isNaN(mu)) continue;
-
-                // grow width
-                int w = 1;
-                while (u + w < U && !used[u + w][v] && almostEq(grid[u + w][v], mu, EPS)) w++;
-
-                // grow height
-                int h = 1;
-                outer:
-                while (v + h < V) {
-                    for (int i = 0; i < w; i++) {
-                        if (used[u + i][v + h] || !almostEq(grid[u + i][v + h], mu, EPS)) break outer;
-                    }
-                    h++;
-                }
-
-                // mark used and emit rect
-                for (int du = 0; du < w; du++) {
-                    for (int dv = 0; dv < h; dv++) used[u + du][v + dv] = true;
-                }
-                out.emit(u, v, u + w, v + h, mu);
+        void fillTemp(int u0, int v0, int u1, int v1) {
+            u0 = clamp(u0, 0, U); u1 = clamp(u1, 0, U);
+            v0 = clamp(v0, 0, V); v1 = clamp(v1, 0, V);
+            tempU0 = u0; tempV0 = v0; tempU1 = u1; tempV1 = v1;
+            Arrays.fill(temp, false);
+            Arrays.fill(tempCull, false);
+            for (int v = v0; v < v1; v++) {
+                int row = v * U;
+                for (int u = u0; u < u1; u++) temp[row + u] = true;
             }
         }
+
+        void cullTemp(int u0, int v0, int u1, int v1) {
+            u0 = clamp(u0, 0, U); u1 = clamp(u1, 0, U);
+            v0 = clamp(v0, 0, V); v1 = clamp(v1, 0, V);
+            for (int v = v0; v < v1; v++) {
+                int row = v * U;
+                for (int u = u0; u < u1; u++) {
+                    tempCull[row + u] = true;
+                }
+            }
+        }
+
+        void commitTemp(int depth) {
+            boolean[] layer = layers.get(depth);
+            for (int v = tempV0; v < tempV1; v++) {
+                int row = v * U;
+                for (int u = tempU0; u < tempU1; u++) {
+                    int idx = row + u;
+                    if (temp[idx] && !tempCull[idx]) layer[idx] = true;
+                }
+            }
+        }
+
+        interface Emit {
+            void rect(int u0, int v0, int u1, int v1, int depth);
+        }
+
+        void greedy(Emit emit) {
+            // Greedy mesh each depth independently
+            boolean[] used = new boolean[U * V];
+            for (Map.Entry<Integer, boolean[]> e : layers.entrySet()) {
+                int depth = e.getKey();
+                boolean[] mask = e.getValue();
+                Arrays.fill(used, false);
+
+                for (int v = 0; v < V; v++) {
+                    int row = v * U;
+                    for (int u = 0; u < U; u++) {
+                        int idx = row + u;
+                        if (used[idx] || !mask[idx]) continue;
+
+                        // grow width
+                        int w = 1;
+                        while (u + w < U && !used[row + u + w] && mask[row + u + w]) w++;
+
+                        // grow height
+                        int h = 1;
+                        outer:
+                        while (v + h < V) {
+                            int r2 = (v + h) * U;
+                            for (int uu = 0; uu < w; uu++) {
+                                if (used[r2 + u + uu] || !mask[r2 + u + uu]) break outer;
+                            }
+                            h++;
+                        }
+
+                        // mark used
+                        for (int dv = 0; dv < h; dv++) {
+                            int r3 = (v + dv) * U;
+                            for (int du = 0; du < w; du++) used[r3 + u + du] = true;
+                        }
+
+                        emit.rect(u, v, u + w, v + h, depth);
+                    }
+                }
+            }
+        }
+
+        private static int clamp(int x, int lo, int hi) {
+            return x < lo ? lo : Math.min(x, hi);
+        }
     }
 
-    private interface RectConsumer {
-        void emit(int u0, int v0, int u1, int v1, float friction);
-    }
-
-    private static boolean almostEq(float a, float b, float eps) {
-        return Math.abs(a - b) <= eps;
-    }
+    /* -------- old 2D float greedy kept for reference; unused now -------- */
 }
