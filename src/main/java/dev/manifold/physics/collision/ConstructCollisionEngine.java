@@ -74,12 +74,13 @@ public final class ConstructCollisionEngine {
         ConstructCollisionManager.Planes planes = opt.get();
         // 1) Pre-advance to the requested position
         AABB moved = startBBLocal;
+        Vec3 deltaMovement = self.getDeltaMovement();
 
         // 2) One-shot anti-penetration opposite to the incoming velocity
         //    (prevents “prefer Y” when flying into a 1-block-tall platform side)
-        double penX = pushOutX_independent(moved, planes, /*useLedgeEps*/ true);
-        double penY = pushOutY_independent(moved, planes);
-        double penZ = pushOutZ_independent(moved, planes, /*useLedgeEps*/ true);
+        double penX = pushOutX_independent(moved, planes, true, deltaMovement.x);
+        double penY = pushOutY_independent(moved, planes, deltaMovement.y);
+        double penZ = pushOutZ_independent(moved, planes, true, deltaMovement.z);
 
         double antiX = 0.0, antiY = 0.0, antiZ = 0.0;
         if (penX != 0.0 && Math.signum(penX) == -Math.signum(desiredLocal.x)) antiX = penX;
@@ -99,7 +100,7 @@ public final class ConstructCollisionEngine {
         // X component
         if (desiredLocal.x != 0.0) {
             AABB afterX = moved.move(desiredLocal.x, 0.0, 0.0);
-            double pushX = pushOutX_independent(afterX, planes, /*useLedgeEps*/ true);
+            double pushX = pushOutX_independent(afterX, planes, /*useLedgeEps*/ true, deltaMovement.x);
             // Only accept a push that negates penetration along the direction we moved
             if (pushX != 0.0 && Math.signum(pushX) == -Math.signum(desiredLocal.x)) {
                 outX = desiredLocal.x + pushX;
@@ -113,7 +114,7 @@ public final class ConstructCollisionEngine {
         // Y component (usually what keeps you on top, already unbiased by the split)
         if (desiredLocal.y != 0.0) {
             AABB afterY = moved.move(0.0, desiredLocal.y, 0.0);
-            double pushY = pushOutY_independent(afterY, planes);
+            double pushY = pushOutY_independent(afterY, planes, deltaMovement.y);
             if (pushY != 0.0 && Math.signum(pushY) == -Math.signum(desiredLocal.y)) {
                 outY = desiredLocal.y + pushY;
                 moved = afterY.move(0.0, pushY, 0.0);
@@ -126,7 +127,7 @@ public final class ConstructCollisionEngine {
         // Z component
         if (desiredLocal.z != 0.0) {
             AABB afterZ = moved.move(0.0, 0.0, desiredLocal.z);
-            double pushZ = pushOutZ_independent(afterZ, planes, /*useLedgeEps*/ true);
+            double pushZ = pushOutZ_independent(afterZ, planes, /*useLedgeEps*/ true, deltaMovement.z);
             if (pushZ != 0.0 && Math.signum(pushZ) == -Math.signum(desiredLocal.z)) {
                 outZ = desiredLocal.z + pushZ;
                 moved = afterZ.move(0.0, 0.0, pushZ);
@@ -148,19 +149,19 @@ public final class ConstructCollisionEngine {
     }
 
     /** Minimal signed Y displacement to separate 'bb' from UP/DOWN planes. */
-    private static double pushOutY_independent(AABB bb, ConstructCollisionManager.Planes planes) {
+    private static double pushOutY_independent(AABB bb, ConstructCollisionManager.Planes planes, double yDelta) {
         double pushUp = 0.0;  // +Y
         double pushDn = 0.0;  // -Y
 
         // UP (depth = Y+1), in-plane (u,v)=(X,Z)
         for (CollisionPlane.Rect r : planes.rects(Direction.UP)) {
             final double y = r.depth;
-            if (y <= bb.minY || y >= bb.maxY) continue;
+            if (y <= bb.minY || y >= bb.maxY - yDelta) continue;
             if (!overlap1D(bb.minX, bb.maxX, r.u0, r.u1)) continue;
             if (!overlap1D(bb.minZ, bb.maxZ, r.v0, r.v1)) continue;
 
             double candUp = (y - bb.minY) + SKIN;  // > 0
-            double candDn = (y - bb.maxY) - SKIN;  // < 0
+            double candDn = (y - (bb.maxY + yDelta)) - SKIN;  // < 0
             if (candUp > 0.0 && (pushUp == 0.0 || candUp < pushUp)) pushUp = candUp;
             if (candDn < 0.0 && (pushDn == 0.0 || candDn > pushDn)) pushDn = candDn;
         }
@@ -168,11 +169,11 @@ public final class ConstructCollisionEngine {
         // DOWN (depth = Y), in-plane (u,v)=(X,Z)
         for (CollisionPlane.Rect r : planes.rects(Direction.DOWN)) {
             final double y = r.depth;
-            if (y <= bb.minY || y >= bb.maxY) continue;
+            if (y <= bb.minY - yDelta || y >= bb.maxY) continue;
             if (!overlap1D(bb.minX, bb.maxX, r.u0, r.u1)) continue;
             if (!overlap1D(bb.minZ, bb.maxZ, r.v0, r.v1)) continue;
 
-            double candUp = (y - bb.minY) + SKIN;
+            double candUp = (y - (bb.minY + yDelta)) + SKIN;
             double candDn = (y - bb.maxY) - SKIN;
             if (candUp > 0.0 && (pushUp == 0.0 || candUp < pushUp)) pushUp = candUp;
             if (candDn < 0.0 && (pushDn == 0.0 || candDn > pushDn)) pushDn = candDn;
@@ -182,7 +183,7 @@ public final class ConstructCollisionEngine {
     }
 
     /** Minimal signed X displacement to separate 'bb' from EAST/WEST planes. */
-    private static double pushOutX_independent(AABB bb, ConstructCollisionManager.Planes planes, boolean useLedgeEps) {
+    private static double pushOutX_independent(AABB bb, ConstructCollisionManager.Planes planes, boolean useLedgeEps, double xDelta) {
         double pushRt = 0.0;  // +X
         double pushLt = 0.0;  // -X
         final double yMinForSide = useLedgeEps ? (bb.minY + LEDGE_EPS) : bb.minY;
@@ -190,12 +191,12 @@ public final class ConstructCollisionEngine {
         // EAST (depth=X+1), in-plane (u,v)=(Z,Y)
         for (CollisionPlane.Rect r : planes.rects(Direction.EAST)) {
             final double x = r.depth;
-            if (x <= bb.minX || x >= bb.maxX) continue;
+            if (x <= bb.minX || x >= bb.maxX - xDelta) continue;
             if (!overlap1D(bb.minZ, bb.maxZ, r.u0, r.u1)) continue;
             if (!overlap1D(yMinForSide, bb.maxY, r.v0, r.v1)) continue; // << ledge slip here
 
             double candRt = (x - bb.minX) + SKIN;  // > 0
-            double candLt = (x - bb.maxX) - SKIN;  // < 0
+            double candLt = (x - (bb.maxX + xDelta)) - SKIN;  // < 0
             if (candRt > 0.0 && (pushRt == 0.0 || candRt < pushRt)) pushRt = candRt;
             if (candLt < 0.0 && (pushLt == 0.0 || candLt > pushLt)) pushLt = candLt;
         }
@@ -203,11 +204,11 @@ public final class ConstructCollisionEngine {
         // WEST (depth=X), in-plane (u,v)=(Z,Y)
         for (CollisionPlane.Rect r : planes.rects(Direction.WEST)) {
             final double x = r.depth;
-            if (x <= bb.minX || x >= bb.maxX) continue;
+            if (x <= bb.minX - xDelta || x >= bb.maxX) continue;
             if (!overlap1D(bb.minZ, bb.maxZ, r.u0, r.u1)) continue;
             if (!overlap1D(yMinForSide, bb.maxY, r.v0, r.v1)) continue; // << ledge slip here
 
-            double candRt = (x - bb.minX) + SKIN;
+            double candRt = (x - (bb.minX + xDelta)) + SKIN;
             double candLt = (x - bb.maxX) - SKIN;
             if (candRt > 0.0 && (pushRt == 0.0 || candRt < pushRt)) pushRt = candRt;
             if (candLt < 0.0 && (pushLt == 0.0 || candLt > pushLt)) pushLt = candLt;
@@ -217,7 +218,7 @@ public final class ConstructCollisionEngine {
     }
 
     /** Minimal signed Z displacement to separate 'bb' from SOUTH/NORTH planes. */
-    private static double pushOutZ_independent(AABB bb, ConstructCollisionManager.Planes planes, boolean useLedgeEps) {
+    private static double pushOutZ_independent(AABB bb, ConstructCollisionManager.Planes planes, boolean useLedgeEps, double zDelta) {
         double pushFwd = 0.0; // +Z
         double pushBak = 0.0; // -Z
         final double yMinForSide = useLedgeEps ? (bb.minY + LEDGE_EPS) : bb.minY;
@@ -225,12 +226,12 @@ public final class ConstructCollisionEngine {
         // SOUTH (depth=Z+1), in-plane (u,v)=(X,Y)
         for (CollisionPlane.Rect r : planes.rects(Direction.SOUTH)) {
             final double z = r.depth;
-            if (z <= bb.minZ || z >= bb.maxZ) continue;
+            if (z <= bb.minZ || z >= bb.maxZ - zDelta) continue;
             if (!overlap1D(bb.minX, bb.maxX, r.u0, r.u1)) continue;
             if (!overlap1D(yMinForSide, bb.maxY, r.v0, r.v1)) continue; // << ledge slip here
 
             double candF = (z - bb.minZ) + SKIN;  // > 0
-            double candB = (z - bb.maxZ) - SKIN;  // < 0
+            double candB = (z - (bb.maxZ + zDelta)) - SKIN;  // < 0
             if (candF > 0.0 && (pushFwd == 0.0 || candF < pushFwd)) pushFwd = candF;
             if (candB < 0.0 && (pushBak == 0.0 || candB > pushBak)) pushBak = candB;
         }
@@ -238,11 +239,11 @@ public final class ConstructCollisionEngine {
         // NORTH (depth=Z), in-plane (u,v)=(X,Y)
         for (CollisionPlane.Rect r : planes.rects(Direction.NORTH)) {
             final double z = r.depth;
-            if (z <= bb.minZ || z >= bb.maxZ) continue;
+            if (z <= bb.minZ - zDelta || z >= bb.maxZ) continue;
             if (!overlap1D(bb.minX, bb.maxX, r.u0, r.u1)) continue;
             if (!overlap1D(yMinForSide, bb.maxY, r.v0, r.v1)) continue; // << ledge slip here
 
-            double candF = (z - bb.minZ) + SKIN;
+            double candF = (z - (bb.minZ + zDelta)) + SKIN;
             double candB = (z - bb.maxZ) - SKIN;
             if (candF > 0.0 && (pushFwd == 0.0 || candF < pushFwd)) pushFwd = candF;
             if (candB < 0.0 && (pushBak == 0.0 || candB > pushBak)) pushBak = candB;
