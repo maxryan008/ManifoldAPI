@@ -3,18 +3,11 @@ package dev.manifold.physics.collision;
 import dev.manifold.ConstructManager;
 import dev.manifold.DynamicConstruct;
 import net.minecraft.core.Direction;
-import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
-import org.joml.Matrix3f;
 import org.joml.Quaternionf;
-import org.joml.Vector3f;
 
-import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 
@@ -80,9 +73,9 @@ public final class ConstructCollisionEngine {
 
         // 2) One-shot anti-penetration opposite to the incoming velocity
         //    (prevents “prefer Y” when flying into a 1-block-tall platform side)
-        double penX = pushOutX_independent(moved, planes, true, deltaMovement.x);
+        double penX = pushOutX_independent(moved, planes, deltaMovement.x);
         double penY = pushOutY_independent(moved, planes, deltaMovement.y);
-        double penZ = pushOutZ_independent(moved, planes, true, deltaMovement.z);
+        double penZ = pushOutZ_independent(moved, planes, deltaMovement.z);
 
         double antiX = 0.0, antiY = 0.0, antiZ = 0.0;
         if (penX != 0.0 && Math.signum(penX) == -Math.signum(desiredLocal.x)) antiX = penX;
@@ -102,7 +95,7 @@ public final class ConstructCollisionEngine {
         // X component
         if (desiredLocal.x != 0.0) {
             AABB afterX = moved.move(desiredLocal.x, 0.0, 0.0);
-            double pushX = pushOutX_independent(afterX, planes, /*useLedgeEps*/ true, deltaMovement.x);
+            double pushX = pushOutX_independent(afterX, planes, /*useLedgeEps*/  deltaMovement.x);
             // Only accept a push that negates penetration along the direction we moved
             if (pushX != 0.0 && Math.signum(pushX) == -Math.signum(desiredLocal.x)) {
                 outX = desiredLocal.x + pushX;
@@ -129,7 +122,7 @@ public final class ConstructCollisionEngine {
         // Z component
         if (desiredLocal.z != 0.0) {
             AABB afterZ = moved.move(0.0, 0.0, desiredLocal.z);
-            double pushZ = pushOutZ_independent(afterZ, planes, /*useLedgeEps*/ true, deltaMovement.z);
+            double pushZ = pushOutZ_independent(afterZ, planes, /*useLedgeEps*/  deltaMovement.z);
             if (pushZ != 0.0 && Math.signum(pushZ) == -Math.signum(desiredLocal.z)) {
                 outZ = desiredLocal.z + pushZ;
                 moved = afterZ.move(0.0, 0.0, pushZ);
@@ -161,8 +154,8 @@ public final class ConstructCollisionEngine {
             final double v0 = r.v0 / (double)GRID, v1 = r.v1 / (double)GRID;
 
             if (y <= bb.minY || y >= bb.maxY - yDelta) continue;
-            if (!overlap1D(bb.minX, bb.maxX, u0, u1)) continue;
-            if (!overlap1D(bb.minZ, bb.maxZ, v0, v1)) continue;
+            if (notOverlap1D(bb.minX, bb.maxX, u0, u1)) continue;
+            if (notOverlap1D(bb.minZ, bb.maxZ, v0, v1)) continue;
 
             double candUp = (y - bb.minY) + SKIN;
             double candDn = (y - (bb.maxY + yDelta)) - SKIN;
@@ -176,8 +169,8 @@ public final class ConstructCollisionEngine {
             final double v0 = r.v0 / (double)GRID, v1 = r.v1 / (double)GRID;
 
             if (y <= bb.minY - yDelta || y >= bb.maxY) continue;
-            if (!overlap1D(bb.minX, bb.maxX, u0, u1)) continue;
-            if (!overlap1D(bb.minZ, bb.maxZ, v0, v1)) continue;
+            if (notOverlap1D(bb.minX, bb.maxX, u0, u1)) continue;
+            if (notOverlap1D(bb.minZ, bb.maxZ, v0, v1)) continue;
 
             double candUp = (y - (bb.minY + yDelta)) + SKIN;
             double candDn = (y - bb.maxY) - SKIN;
@@ -189,10 +182,10 @@ public final class ConstructCollisionEngine {
     }
 
     /** Minimal signed X displacement to separate 'bb' from EAST/WEST planes. */
-    private static double pushOutX_independent(AABB bb, ConstructCollisionManager.Planes planes, boolean useLedgeEps, double xDelta) {
+    private static double pushOutX_independent(AABB bb, ConstructCollisionManager.Planes planes, double xDelta) {
         double pushRt = 0.0;  // +X
         double pushLt = 0.0;  // -X
-        final double yMinForSide = useLedgeEps ? (bb.minY + LEDGE_EPS) : bb.minY;
+        final double yMinForSide = (bb.minY + LEDGE_EPS);
 
         for (CollisionPlane.Rect r : planes.rects(Direction.EAST)) {
             final double x = r.depth / (double)GRID;
@@ -200,8 +193,8 @@ public final class ConstructCollisionEngine {
             final double v0 = r.v0 / (double)GRID, v1 = r.v1 / (double)GRID;
 
             if (x <= bb.minX || x >= bb.maxX - xDelta) continue;
-            if (!overlap1D(bb.minZ, bb.maxZ, u0, u1)) continue;
-            if (!overlap1D(yMinForSide, bb.maxY, v0, v1)) continue;
+            if (notOverlap1D(bb.minZ, bb.maxZ, u0, u1)) continue;
+            if (notOverlap1D(yMinForSide, bb.maxY, v0, v1)) continue;
 
             double candRt = (x - bb.minX) + SKIN;
             double candLt = (x - (bb.maxX + xDelta)) - SKIN;
@@ -215,8 +208,8 @@ public final class ConstructCollisionEngine {
             final double v0 = r.v0 / (double)GRID, v1 = r.v1 / (double)GRID;
 
             if (x <= bb.minX - xDelta || x >= bb.maxX) continue;
-            if (!overlap1D(bb.minZ, bb.maxZ, u0, u1)) continue;
-            if (!overlap1D(yMinForSide, bb.maxY, v0, v1)) continue;
+            if (notOverlap1D(bb.minZ, bb.maxZ, u0, u1)) continue;
+            if (notOverlap1D(yMinForSide, bb.maxY, v0, v1)) continue;
 
             double candRt = (x - (bb.minX + xDelta)) + SKIN;
             double candLt = (x - bb.maxX) - SKIN;
@@ -228,10 +221,10 @@ public final class ConstructCollisionEngine {
     }
 
     /** Minimal signed Z displacement to separate 'bb' from SOUTH/NORTH planes. */
-    private static double pushOutZ_independent(AABB bb, ConstructCollisionManager.Planes planes, boolean useLedgeEps, double zDelta) {
+    private static double pushOutZ_independent(AABB bb, ConstructCollisionManager.Planes planes, double zDelta) {
         double pushFwd = 0.0; // +Z
         double pushBak = 0.0; // -Z
-        final double yMinForSide = useLedgeEps ? (bb.minY + LEDGE_EPS) : bb.minY;
+        final double yMinForSide = (bb.minY + LEDGE_EPS);
 
         for (CollisionPlane.Rect r : planes.rects(Direction.SOUTH)) {
             final double z = r.depth / (double)GRID;
@@ -239,8 +232,8 @@ public final class ConstructCollisionEngine {
             final double v0 = r.v0 / (double)GRID, v1 = r.v1 / (double)GRID;
 
             if (z <= bb.minZ || z >= bb.maxZ - zDelta) continue;
-            if (!overlap1D(bb.minX, bb.maxX, u0, u1)) continue;
-            if (!overlap1D(yMinForSide, bb.maxY, v0, v1)) continue;
+            if (notOverlap1D(bb.minX, bb.maxX, u0, u1)) continue;
+            if (notOverlap1D(yMinForSide, bb.maxY, v0, v1)) continue;
 
             double candF = (z - bb.minZ) + SKIN;
             double candB = (z - (bb.maxZ + zDelta)) - SKIN;
@@ -254,8 +247,8 @@ public final class ConstructCollisionEngine {
             final double v0 = r.v0 / (double)GRID, v1 = r.v1 / (double)GRID;
 
             if (z <= bb.minZ - zDelta || z >= bb.maxZ) continue;
-            if (!overlap1D(bb.minX, bb.maxX, u0, u1)) continue;
-            if (!overlap1D(yMinForSide, bb.maxY, v0, v1)) continue;
+            if (notOverlap1D(bb.minX, bb.maxX, u0, u1)) continue;
+            if (notOverlap1D(yMinForSide, bb.maxY, v0, v1)) continue;
 
             double candF = (z - (bb.minZ + zDelta)) + SKIN;
             double candB = (z - bb.maxZ) - SKIN;
@@ -269,8 +262,8 @@ public final class ConstructCollisionEngine {
     /* -------- small utilities (unchanged) -------- */
 
     /** 1D interval overlap, treating rects as half-open [b0,b1) and the AABB as closed. */
-    private static boolean overlap1D(double a0, double a1, double b0, double b1) {
-        return a1 > b0 && b1 > a0;
+    private static boolean notOverlap1D(double a0, double a1, double b0, double b1) {
+        return !(a1 > b0) || !(b1 > a0);
     }
 
     private static AABB expandByMotion(AABB box, Vec3 motion) {

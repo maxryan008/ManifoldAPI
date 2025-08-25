@@ -13,7 +13,7 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * Builds six greedy-meshed planes using each block's VoxelShape.
  * All coordinates are in sub-voxels (1 unit = 1/16 block).
- *
+ * <p>
  * Coordinate conventions per plane:
  *  - UP/DOWN:    u = X*16.., v = Z*16.., depth = Y*16 (+0..16 inside the block)
  *  - NORTH/SOUTH: u = X*16.., v = Y*16.., depth = Z*16 (+0..16)
@@ -286,6 +286,10 @@ public final class ConstructCollisionManager {
         return (int)Math.ceil(v * GRID - EPS);
     }
 
+    public static Collection<Planes> getAll() {
+        return BY_ID.values();
+    }
+
     private static float frictionDefault() { return 0.6f; }
 
     /**
@@ -311,8 +315,8 @@ public final class ConstructCollisionManager {
         }
 
         void fillTemp(int u0, int v0, int u1, int v1) {
-            u0 = clamp(u0, 0, U); u1 = clamp(u1, 0, U);
-            v0 = clamp(v0, 0, V); v1 = clamp(v1, 0, V);
+            u0 = clamp(u0, U); u1 = clamp(u1, U);
+            v0 = clamp(v0, V); v1 = clamp(v1, V);
             tempU0 = u0; tempV0 = v0; tempU1 = u1; tempV1 = v1;
             Arrays.fill(temp, false);
             Arrays.fill(tempCull, false);
@@ -323,8 +327,8 @@ public final class ConstructCollisionManager {
         }
 
         void cullTemp(int u0, int v0, int u1, int v1) {
-            u0 = clamp(u0, 0, U); u1 = clamp(u1, 0, U);
-            v0 = clamp(v0, 0, V); v1 = clamp(v1, 0, V);
+            u0 = clamp(u0, U); u1 = clamp(u1, U);
+            v0 = clamp(v0, V); v1 = clamp(v1, V);
             for (int v = v0; v < v1; v++) {
                 int row = v * U;
                 for (int u = u0; u < u1; u++) {
@@ -389,8 +393,8 @@ public final class ConstructCollisionManager {
             }
         }
 
-        private static int clamp(int x, int lo, int hi) {
-            return x < lo ? lo : Math.min(x, hi);
+        private static int clamp(int x, int hi) {
+            return x < 0 ? 0 : Math.min(x, hi);
         }
     }
 

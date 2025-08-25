@@ -26,23 +26,14 @@ import java.util.Optional;
 import java.util.UUID;
 
 @Environment(EnvType.CLIENT)
-public class ManifoldRenderChunkRegion implements BlockAndTintGetter, LightChunkGetter {
-    protected final Map<Long, ManifoldRenderChunk> chunks;
-    protected final Level level;
-    private final int chunkCountX;
-    private final int chunkCountZ;
-    private final int minChunkX;
-    private final int minChunkZ;
-
-    public ManifoldRenderChunkRegion(Level level, int minChunkX, int minChunkZ, int chunkCountX, int chunkCountZ, Map<Long, ManifoldRenderChunk> chunks) {
-        this.level = level;
-        this.minChunkX = minChunkX;
-        this.minChunkZ = minChunkZ;
-        this.chunkCountX = chunkCountX;
-        this.chunkCountZ = chunkCountZ;
-        this.chunks = chunks;
-    }
-
+public record ManifoldRenderChunkRegion(
+        Level level,
+        int minChunkX,
+        int minChunkZ,
+        int chunkCountX,
+        int chunkCountZ,
+        Map<Long, ManifoldRenderChunk> chunks
+) implements BlockAndTintGetter, LightChunkGetter {
     public static long chunkPosToLong(int x, int z) {
         return ((long) x & 0xFFFFFFFFL) | (((long) z & 0xFFFFFFFFL) << 32);
     }
@@ -94,7 +85,9 @@ public class ManifoldRenderChunkRegion implements BlockAndTintGetter, LightChunk
 
         Optional<UUID> uuidOptional = ConstructManager.INSTANCE.getConstructAt(worldPos);
 
-        List<DynamicConstruct> nearbyConstructs = ConstructManager.INSTANCE.getNearbyConstructs(level.dimension(),ConstructManager.INSTANCE.getRenderPosFromSim(uuidOptional.get(), worldPos), 2); // 2 chunks radius
+        if (uuidOptional.isEmpty()) return 0;
+
+        List<DynamicConstruct> nearbyConstructs = ConstructManager.INSTANCE.getNearbyConstructs(level.dimension(), ConstructManager.INSTANCE.getRenderPosFromSim(uuidOptional.get(), worldPos), 2); // 2 chunks radius
 
         for (DynamicConstruct construct : nearbyConstructs) {
             Vec3 renderPosFromSim = ConstructManager.INSTANCE.getRenderPosFromSim(uuidOptional.get(), worldPos);
@@ -114,8 +107,10 @@ public class ManifoldRenderChunkRegion implements BlockAndTintGetter, LightChunk
     @Override
     public int getRawBrightness(BlockPos blockPos, int lightReduction) {
         // Sky light from render world (unchanged)
+        Optional<UUID> uuid = ConstructManager.INSTANCE.getConstructAt(Vec3.atLowerCornerOf(blockPos));
+        if (uuid.isEmpty()) return 0;
         Vec3 skyPos = ConstructManager.INSTANCE.getRenderPosFromSim(
-                ConstructManager.INSTANCE.getConstructAt(Vec3.atLowerCornerOf(blockPos)).get(),
+                uuid.get(),
                 Vec3.atLowerCornerOf(blockPos)
         );
         int skyLight = getLightEngine().getLayerListener(LightLayer.SKY)
@@ -123,7 +118,7 @@ public class ManifoldRenderChunkRegion implements BlockAndTintGetter, LightChunk
 
         // Block light from nearby constructs in render space
         int blockLight = 0;
-        List<DynamicConstruct> nearby = ConstructManager.INSTANCE.getNearbyConstructs(level.dimension(),Vec3.atCenterOf(blockPos), 2);
+        List<DynamicConstruct> nearby = ConstructManager.INSTANCE.getNearbyConstructs(level.dimension(), Vec3.atCenterOf(blockPos), 2);
         for (DynamicConstruct construct : nearby) {
             BlockPos simPos = ConstructManager.INSTANCE.getSimPosFromRender(construct.getId(), Vec3.atCenterOf(blockPos));
             int val = ConstructManager.INSTANCE.getSimDimension()
@@ -153,7 +148,7 @@ public class ManifoldRenderChunkRegion implements BlockAndTintGetter, LightChunk
     }
 
     @Override
-    public BlockGetter getLevel() {
+    public @NotNull BlockGetter getLevel() {
         return this;
     }
 
@@ -175,9 +170,5 @@ public class ManifoldRenderChunkRegion implements BlockAndTintGetter, LightChunk
             return Optional.empty();
         }
         return Optional.of(chunks.get(chunkPosToLong(chunkX, chunkZ)));
-    }
-
-    public Map<Long, ManifoldRenderChunk> getChunks() {
-        return chunks;
     }
 }

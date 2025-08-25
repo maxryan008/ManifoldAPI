@@ -14,7 +14,6 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.*;
 
 import java.io.*;
@@ -90,13 +89,13 @@ public class MassManager {
 
         // Ensure parent directory exists
         File file = savePath.toFile();
-        file.getParentFile().mkdirs(); // Creates config/manifold if needed
+        boolean _ = file.getParentFile().mkdirs();// Creates config/manifold if needed
 
         try (Writer writer = new FileWriter(file)) {
             Gson gson = new GsonBuilder().setPrettyPrinting().create();
             gson.toJson(root, writer);
         } catch (IOException e) {
-            e.printStackTrace();
+            Manifold.LOGGER.error("Couldn't save mass data to {}", file.getAbsolutePath(), e);
         }
     }
 
@@ -137,7 +136,7 @@ public class MassManager {
                     }
                 }
             } catch (IOException e) {
-                e.printStackTrace();
+                Manifold.LOGGER.error("Failed to load Mass Data", e);
             }
         }
 
@@ -270,7 +269,7 @@ public class MassManager {
                 if (scc.size() <= 1) continue; // skip singletons here
                 boolean hasRecipe = scc.stream().anyMatch(i -> !outputRecipes.getOrDefault(i, List.of()).isEmpty());
                 if (!hasRecipe) continue;
-                solveSccMasses(scc, outputRecipes, known, server, DEFAULT_MASS);
+                solveSccMasses(scc, outputRecipes, known, server);
             }
 
             // 2) Re-run worklist to consume newly known cycle outputs (e.g., spyglass after copper)
@@ -406,13 +405,12 @@ public class MassManager {
             Set<Item> scc,
             Map<Item, List<CraftingRecipe>> outputRecipes,
             Set<Item> known,
-            MinecraftServer server,
-            double defaultMassAnchor
+            MinecraftServer server
     ) {
         // variables to solve
         List<Item> vars = new ArrayList<>(scc);
         Map<Item, Double> x = new HashMap<>();
-        for (Item i : vars) x.put(i, overriddenMasses.getOrDefault(i, defaultMassAnchor));
+        for (Item i : vars) x.put(i, overriddenMasses.getOrDefault(i, MassManager.DEFAULT_MASS));
 
         // Does SCC have any external known anchor?
         boolean hasExternalAnchor = false;
@@ -478,8 +476,8 @@ public class MassManager {
         // If there was no external anchor, scale SCC so pivot matches defaultMassAnchor
         if (!hasExternalAnchor) {
             Item pivot = pickPivot(scc, server);
-            double pv = Math.max(1e-9, x.getOrDefault(pivot, defaultMassAnchor));
-            double scale = defaultMassAnchor / pv;
+            double pv = Math.max(1e-9, x.getOrDefault(pivot, MassManager.DEFAULT_MASS));
+            double scale = MassManager.DEFAULT_MASS / pv;
             for (Item i : vars) {
                 x.put(i, x.get(i) * scale);
             }
@@ -606,15 +604,12 @@ public class MassManager {
                 autoMasses.add(scc.stream().toList().getLast());
             } else {
                 // this SCC is a base
-                Item chosenBase = scc.stream().min(
+                scc.stream().min(
                         Comparator
                                 .comparing((Item i) -> (i instanceof BlockItem) ? 0 : 1)
                                 .thenComparing(i -> Objects.requireNonNull(itemRegistry.getKey(i)).toString())
-                ).orElse(null);
+                ).ifPresent(baseItems::add);
 
-                if (chosenBase != null) {
-                    baseItems.add(chosenBase);
-                }
             }
         }
 

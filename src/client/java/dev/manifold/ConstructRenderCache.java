@@ -68,7 +68,7 @@ public class ConstructRenderCache {
         if (!isCurrentDimension(id)) return;
         List<ManifoldRenderSection> sectionList = new ArrayList<>();
 
-        for (ManifoldRenderChunk renderChunk : region.getChunks().values()) {
+        for (ManifoldRenderChunk renderChunk : region.chunks().values()) {
             LevelChunk chunk = renderChunk.getWrappedChunk();
             LevelChunkSection[] sectionsArray = chunk.getSections();
 
