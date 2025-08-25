@@ -89,7 +89,7 @@ public class MassManager {
 
         // Ensure parent directory exists
         File file = savePath.toFile();
-        boolean _ = file.getParentFile().mkdirs();// Creates config/manifold if needed
+        file.getParentFile().mkdirs();// Creates config/manifold if needed
 
         try (Writer writer = new FileWriter(file)) {
             Gson gson = new GsonBuilder().setPrettyPrinting().create();
