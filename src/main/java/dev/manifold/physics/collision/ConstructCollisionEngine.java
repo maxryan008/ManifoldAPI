@@ -59,6 +59,7 @@ public final class ConstructCollisionEngine {
                 }
             }
         }
+
         return outWorld;
     }
 
@@ -269,13 +270,38 @@ public final class ConstructCollisionEngine {
         return new AABB(minX, minY, minZ, maxX, maxY, maxZ);
     }
 
-    private static Vec3 rotateVec(Vec3 v, Quaternionf q) {
-        org.joml.Vector3f t = new org.joml.Vector3f((float) v.x, (float) v.y, (float) v.z);
-        t.rotate(q);
-        return new Vec3(t.x, t.y, t.z);
+    private static Vec3 rotateVec(Vec3 v, Quaternionf qf) {
+        // Fast path: exact identity (or extremely close)
+        if (Math.abs(qf.x) < 1e-15 && Math.abs(qf.y) < 1e-15 &&
+                Math.abs(qf.z) < 1e-15 && Math.abs(1.0f - qf.w) < 1e-15) {
+            return v;
+        }
+
+        // Use double-precision quaternion rotation:
+        // t = 2 * (q.xyz × v)
+        // v' = v + q.w * t + (q.xyz × t)
+        double x = v.x, y = v.y, z = v.z;
+        double qx = qf.x, qy = qf.y, qz = qf.z, qw = qf.w;
+
+        // Normalize if needed (cheap guard against drift)
+        double n = Math.sqrt(qx*qx + qy*qy + qz*qz + qw*qw);
+        if (Math.abs(n - 1.0) > 1e-12 && n > 0.0) {
+            qx /= n; qy /= n; qz /= n; qw /= n;
+        }
+
+        double tx = 2.0 * (qy * z - qz * y);
+        double ty = 2.0 * (qz * x - qx * z);
+        double tz = 2.0 * (qx * y - qy * x);
+
+        double rx = x + qw * tx + (qy * tz - qz * ty);
+        double ry = y + qw * ty + (qz * tx - qx * tz);
+        double rz = z + qw * tz + (qx * ty - qy * tx);
+
+        return new Vec3(rx, ry, rz);
     }
 
     public static AABB rotateAABB(AABB box, Quaternionf q) {
+        // Use the double-precision rotateVec above for each corner
         Vec3[] corners = {
                 new Vec3(box.minX, box.minY, box.minZ),
                 new Vec3(box.minX, box.minY, box.maxZ),
@@ -286,17 +312,15 @@ public final class ConstructCollisionEngine {
                 new Vec3(box.maxX, box.maxY, box.minZ),
                 new Vec3(box.maxX, box.maxY, box.maxZ),
         };
+
         double minX = Double.POSITIVE_INFINITY, minY = Double.POSITIVE_INFINITY, minZ = Double.POSITIVE_INFINITY;
         double maxX = Double.NEGATIVE_INFINITY, maxY = Double.NEGATIVE_INFINITY, maxZ = Double.NEGATIVE_INFINITY;
+
         for (Vec3 c : corners) {
-            org.joml.Vector3f v = new org.joml.Vector3f((float) c.x, (float) c.y, (float) c.z);
-            v.rotate(q);
-            if (v.x < minX) minX = v.x;
-            if (v.x > maxX) maxX = v.x;
-            if (v.y < minY) minY = v.y;
-            if (v.y > maxY) maxY = v.y;
-            if (v.z < minZ) minZ = v.z;
-            if (v.z > maxZ) maxZ = v.z;
+            Vec3 r = rotateVec(c, q); // << double-precision rotation
+            if (r.x < minX) minX = r.x; if (r.x > maxX) maxX = r.x;
+            if (r.y < minY) minY = r.y; if (r.y > maxY) maxY = r.y;
+            if (r.z < minZ) minZ = r.z; if (r.z > maxZ) maxZ = r.z;
         }
         return new AABB(minX, minY, minZ, maxX, maxY, maxZ);
     }
