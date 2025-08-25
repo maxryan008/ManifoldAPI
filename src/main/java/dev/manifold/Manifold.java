@@ -63,7 +63,7 @@ public class Manifold implements ModInitializer {
                     original.getChunkSource().getGenerator()
             );
 
-            System.out.println("Initializing Manifold");
+            Manifold.LOGGER.info("Initializing Manifold");
 
             // Recreate SimLevel using original data
             SimLevel simLevel = new SimLevel(

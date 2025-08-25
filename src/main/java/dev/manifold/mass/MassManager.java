@@ -127,9 +127,6 @@ public class MassManager {
                         JsonElement val = entry.getValue();
                         if (val.isJsonObject()) {
                             JsonObject obj = val.getAsJsonObject();
-                            if (!obj.has("mass")) {
-                                System.out.println("test");
-                            }
                             double mass = obj.get("mass").getAsDouble();
                             boolean isAuto = obj.has("auto") && obj.get("auto").getAsBoolean();
                             setMass(item, mass, isAuto);
@@ -614,8 +611,6 @@ public class MassManager {
                                 .comparing((Item i) -> (i instanceof BlockItem) ? 0 : 1)
                                 .thenComparing(i -> Objects.requireNonNull(itemRegistry.getKey(i)).toString())
                 ).orElse(null);
-
-                System.out.println(chosenBase);
 
                 if (chosenBase != null) {
                     baseItems.add(chosenBase);
