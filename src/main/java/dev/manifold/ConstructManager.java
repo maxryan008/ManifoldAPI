@@ -7,7 +7,12 @@ import dev.manifold.mixin.accessor.LightEngineAccessor;
 import dev.manifold.network.packets.BreakInConstructC2SPacket;
 import dev.manifold.network.packets.ConstructSectionDataS2CPacket;
 import dev.manifold.network.packets.RemoveConstructS2CPacket;
-import dev.manifold.physics.collision.ConstructCollisionManager;
+import dev.manifold.physics.collision.ConstructCollisionManager; // NEW API (local-space OBBs)
+import dev.manifold.physics.collision.VoxelSDF;
+import dev.manifold.physics.core.OBB;
+import dev.manifold.physics.core.RigidState;
+import dev.manifold.physics.math.M3;
+import dev.manifold.physics.math.V3;
 import io.netty.buffer.Unpooled;
 import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
@@ -52,17 +57,82 @@ public class ConstructManager {
         this.simDimension = simDimension;
     }
 
+    public static VoxelSDF buildLocalSdfFromSimArea(ServerLevel sim,
+                                                     BlockPos simOrigin,
+                                                     BlockPos neg, BlockPos pos) {
+        // Collect all solid block centers in local space
+        ArrayList<V3> solids = new ArrayList<>();
+        for (int x = neg.getX(); x <= pos.getX(); x++) {
+            for (int y = neg.getY(); y <= pos.getY(); y++) {
+                for (int z = neg.getZ(); z <= pos.getZ(); z++) {
+                    BlockPos rel = new BlockPos(x, y, z);
+                    BlockPos abs = simOrigin.offset(rel);
+                    if (!sim.getBlockState(abs).isAir()) {
+                        // local center of the unit block at (x,y,z)
+                        solids.add(new V3(x + 0.5, y + 0.5, z + 0.5));
+                    }
+                }
+            }
+        }
+
+        // Define a node grid on integer coordinates that spans the [neg..pos] block region,
+        // plus a 1-cell shell so trilinear samples near the boundary are well-defined.
+        int nx = (pos.getX() - neg.getX() + 1) + 1;
+        int ny = (pos.getY() - neg.getY() + 1) + 1;
+        int nz = (pos.getZ() - neg.getZ() + 1) + 1;
+
+        V3 origin = new V3(neg.getX(), neg.getY(), neg.getZ()); // grid node (0,0,0) is at local (negX,negY,negZ)
+        float[][][] phi = new float[nx][ny][nz];
+
+        // Precompute signed distance at each grid node to the union of blocks.
+        // SDF to union of boxes is: phi(p) = min_i sdf_box(p, center_i, e=(0.5,0.5,0.5))
+        // Positive outside, negative inside.
+        V3 e = new V3(0.5, 0.5, 0.5);
+
+        for (int i = 0; i < nx; i++) {
+            double px = origin.x + i; // node coordinate (integer)
+            for (int j = 0; j < ny; j++) {
+                double py = origin.y + j;
+                for (int k = 0; k < nz; k++) {
+                    double pz = origin.z + k;
+
+                    double best = Double.POSITIVE_INFINITY;
+                    // If no solids, keep it "outside"
+                    for (int s = 0; s < solids.size(); s++) {
+                        V3 c = solids.get(s);
+                        double d = sdfBox(px, py, pz, c, e); // exact SDF to axis-aligned box
+                        if (d < best) best = d;
+                    }
+                    // If there were no solids, best stays +INF; clamp to a large positive
+                    if (best == Double.POSITIVE_INFINITY) best = 1e3;
+                    phi[i][j][k] = (float) best;
+                }
+            }
+        }
+
+        return new VoxelSDF(phi, origin);
+    }
+
+    /** Exact signed distance to an axis-aligned box centered at c with half-extents e. */
+    private static double sdfBox(double px, double py, double pz, V3 c, V3 e) {
+        double dx = Math.abs(px - c.x) - e.x;
+        double dy = Math.abs(py - c.y) - e.y;
+        double dz = Math.abs(pz - c.z) - e.z;
+        double ax = Math.max(dx, 0.0);
+        double ay = Math.max(dy, 0.0);
+        double az = Math.max(dz, 0.0);
+        double outside = Math.sqrt(ax*ax + ay*ay + az*az);
+        double inside = Math.min(Math.max(dx, Math.max(dy, dz)), 0.0);
+        return outside + inside; // positive outside, negative inside
+    }
+
     public void loadFromSave(ConstructSaveData saveData) {
         for (DynamicConstruct construct : saveData.getConstructs().values()) {
             constructs.put(construct.getId(), construct);
             regionOwners.put(getRegionIndex(construct.getSimOrigin()), construct.getId());
-            ConstructCollisionManager.rebuild(
-                    construct.getId(),
-                    simDimension,
-                    construct.getSimOrigin(),
-                    construct.getNegativeBounds(),
-                    construct.getPositiveBounds()
-            );
+
+            // NEW: rebuild local-space OBBs + upsert to collision manager
+            rebuildCollisionForConstruct(construct);
         }
     }
 
@@ -81,13 +151,10 @@ public class ConstructManager {
 
         constructs.put(uuid, construct);
         regionOwners.put(region, uuid);
-        ConstructCollisionManager.rebuild(
-                uuid,
-                simDimension,
-                construct.getSimOrigin(),
-                construct.getNegativeBounds(),
-                construct.getPositiveBounds()
-        );
+
+        // NEW: initial OBBs + upsert
+        rebuildCollisionForConstruct(construct);
+
         return uuid;
     }
 
@@ -96,7 +163,9 @@ public class ConstructManager {
         if (construct != null) {
             clearConstructArea(construct);
             regionOwners.remove(getRegionIndex(construct.getSimOrigin()));
-            ConstructCollisionManager.clear(id);
+
+            // NEW: remove from collision system
+            ConstructCollisionManager.remove(id);
 
             // notify only players in the construct's render dimension
             for (ServerPlayer player : simDimension.getServer().getPlayerList().getPlayers()) {
@@ -195,8 +264,10 @@ public class ConstructManager {
         construct.setMass(oldMass + blockMass);
 
         // -- Connectivity graph --
-
         construct.getConnectivityGraph().addBlock(rel);
+
+        // NEW: OBBs are local; COM changed ⇒ update collision upsert (new localOrigin)
+        rebuildCollisionForConstruct(construct);
     }
 
     public void breakBlockInConstruct(BreakInConstructC2SPacket packet, ServerPlayNetworking.Context context) {
@@ -243,8 +314,10 @@ public class ConstructManager {
             construct.setMass(oldMass - blockMass);
 
             // Connectivity graph
-
             construct.getConnectivityGraph().removeBlock(rel);
+
+            // NEW: COM changed ⇒ refresh collision upsert
+            rebuildCollisionForConstruct(construct);
         }
     }
 
@@ -266,16 +339,17 @@ public class ConstructManager {
         construct.setNegativeBounds(new BlockPos(newNegX, newNegY, newNegZ));
         construct.setPositiveBounds(new BlockPos(newPosX, newPosY, newPosZ));
 
-        ConstructCollisionManager.rebuild(
-                id, simDimension, construct.getSimOrigin(),
-                construct.getNegativeBounds(), construct.getPositiveBounds()
-        );
+        // NEW: bounds changed ⇒ rebuild local OBBs + upsert
+        rebuildCollisionForConstruct(construct);
     }
 
     public void tick(MinecraftServer server) {
         for (DynamicConstruct construct : constructs.values()) {
             // physics update
             construct.physicsTick();
+
+            // NEW: push updated pose/vel to collision system (no OBB rebuild needed here)
+            ConstructCollisionManager.updateState(construct.getId(), rigidFromConstruct(construct));
 
             // compute sim chunks to keep loaded (in sim dimension)
             AABB box = construct.getBoundingBox();
@@ -384,8 +458,8 @@ public class ConstructManager {
                 .toList();
     }
 
-    public Level getSimDimension() {
-        return this.simDimension;
+    public static ServerLevel getSimDimension() {
+        return INSTANCE.simDimension;
     }
 
     public Optional<Vec3> getPosition(UUID id) {
@@ -480,6 +554,9 @@ public class ConstructManager {
                 construct.setPosition(construct.getPosition().add(new Vec3(localShift)));
                 construct.setCenterOfMass(newCOM);
                 construct.setMass(newConstructMass);
+
+                // NEW: COM changed ⇒ refresh collision upsert
+                rebuildCollisionForConstruct(construct);
             }
         }
     }
@@ -491,7 +568,7 @@ public class ConstructManager {
     }
 
     public Optional<ServerLevel> getRenderLevel(UUID uuid) {
-        DynamicConstruct construct = this.constructs.get(uuid);
+        DynamicConstruct construct = constructs.get(uuid);
         if (construct == null) return Optional.empty();
 
         MinecraftServer server = simDimension.getServer();
@@ -643,12 +720,108 @@ public class ConstructManager {
         construct.setNegativeBounds(new BlockPos(minX - 1, minY - 1, minZ - 1));
         construct.setPositiveBounds(new BlockPos(maxX + 1, maxY + 1, maxZ + 1));
 
-        ConstructCollisionManager.rebuild(
-                construct.getId(),
-                ConstructManager.INSTANCE.getSimDimension(),
+        // NEW: rebuild OBBs + upsert to collision manager
+        rebuildCollisionForConstruct(construct);
+    }
+
+    // =========================
+    // ===== NEW HELPERS =======
+    // =========================
+
+    /** Rebuilds local-space OBBs for the given construct and upsserts into collision manager with current state. */
+    private void rebuildCollisionForConstruct(DynamicConstruct construct) {
+        // 1) Local OBBs from the sim area (per solid block)
+        List<OBB> localObbs = buildLocalObbsFromSimArea(
+                simDimension,
+                construct.getSimOrigin(),
+                construct.getNegativeBounds(),
+                construct.getPositiveBounds(),
+                /* default μ */ 0.6
+        );
+
+        // 2) Local SDF from same block set (signed distance to union of unit cubes)
+        VoxelSDF sdf = buildLocalSdfFromSimArea(
+                simDimension,
                 construct.getSimOrigin(),
                 construct.getNegativeBounds(),
                 construct.getPositiveBounds()
         );
+
+        // 3) Upsert with localOrigin = COM (world = pos + rot * (local - COM))
+        V3 localOrigin = new V3(
+                construct.getCenterOfMass().x,
+                construct.getCenterOfMass().y,
+                construct.getCenterOfMass().z
+        );
+
+        ConstructCollisionManager.upsertConstruct(
+                construct.getId(),
+                localObbs,
+                rigidFromConstruct(construct),
+                localOrigin,
+                sdf
+        );
+    }
+
+    /** Builds simple per-block local OBBs for all non-air blocks in [neg..pos] around simOrigin. */
+    public static List<OBB> buildLocalObbsFromSimArea(ServerLevel sim,
+                                                      BlockPos simOrigin,
+                                                      BlockPos neg, BlockPos pos,
+                                                      double defaultMu) {
+        ArrayList<OBB> out = new ArrayList<>();
+        int id = 0;
+        for (int x = neg.getX(); x <= pos.getX(); x++) {
+            for (int y = neg.getY(); y <= pos.getY(); y++) {
+                for (int z = neg.getZ(); z <= pos.getZ(); z++) {
+                    BlockPos rel = new BlockPos(x, y, z);
+                    BlockPos abs = simOrigin.offset(rel);
+                    BlockState bs = sim.getBlockState(abs);
+                    if (bs.isAir()) continue;
+
+                    // Local-space AABB block => local OBB
+                    OBB o = new OBB();
+                    o.c = new V3(x + 0.5, y + 0.5, z + 0.5);
+                    o.e = new V3(0.5, 0.5, 0.5);
+                    o.R = M3.identity();
+                    // TODO: use real material μ from block if desired
+                    o.mu = defaultMu;
+                    o.id = id++;
+                    out.add(o);
+                }
+            }
+        }
+        return out;
+    }
+
+    /** Build a RigidState from DynamicConstruct’s pose + velocities. */
+    public static RigidState rigidFromConstruct(DynamicConstruct c) {
+        // position (world)
+        V3 pos = new V3(c.getPosition().x, c.getPosition().y, c.getPosition().z);
+        // rotation (world)
+        M3 rot = fromQuaternion(c.getRotation());
+        // linear velocity (world)
+        Vec3 v = c.getVelocity(); // assuming you have it; else Vec3.ZERO
+        V3 vLin = new V3(v.x, v.y, v.z);
+        // angular velocity (world): if stored as Quaternion delta per tick, convert; otherwise 0.
+        V3 vAng = new V3(0, 0, 0); // TODO: map your angular-velocity representation
+
+        // Kinematic constructs for now (invMass=0)
+        RigidState rs = new RigidState();
+        rs.set(pos, rot, vLin, vAng, /*invMass*/ 0.0, M3.identity());
+        return rs;
+    }
+
+    /** Convert JOML Quaternionf to our M3 rotation (columns are basis vectors). */
+    private static M3 fromQuaternion(Quaternionf q) {
+        // JOML stores unit quaternion; build 3x3 matrix
+        float xx = q.x * q.x, yy = q.y * q.y, zz = q.z * q.z;
+        float xy = q.x * q.y, xz = q.x * q.z, yz = q.y * q.z;
+        float wx = q.w * q.x, wy = q.w * q.y, wz = q.w * q.z;
+
+        V3 x = new V3(1f - 2f*(yy + zz), 2f*(xy + wz),       2f*(xz - wy));
+        V3 y = new V3(2f*(xy - wz),       1f - 2f*(xx + zz), 2f*(yz + wx));
+        V3 z = new V3(2f*(xz + wy),       2f*(yz - wx),      1f - 2f*(xx + yy));
+        M3 m = new M3(); m.set(x, y, z);
+        return m;
     }
 }

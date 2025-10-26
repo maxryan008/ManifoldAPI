@@ -1,333 +1,351 @@
 package dev.manifold.physics.collision;
 
-import dev.manifold.ConstructManager;
-import dev.manifold.DynamicConstruct;
-import net.minecraft.core.Direction;
+import dev.manifold.physics.core.OBB;
+import dev.manifold.physics.core.RigidState;
+import dev.manifold.physics.math.M3;
+import dev.manifold.physics.math.V3;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
-import org.joml.Quaternionf;
 
+import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
 
+/**
+ * Vanilla-compatible: returns a motion vector (never increases vanilla), after
+ * colliding the player's OBB(s) against any nearby constructs with CCD, friction,
+ * and platform-relative motion.  Ships' OBBs are kept in LOCAL space and transformed
+ * to WORLD at the exact TOI inside the engine.
+ */
 public final class ConstructCollisionEngine {
-    private static final double SKIN = 1e-6;
-    private static final double LEDGE_EPS = 1e-3; // lets you leave platform edges without snagging
-    private static final int GRID = ConstructCollisionManager.GRID; // 16
 
-    public static Vec3 resolveCollisions(
-            Vec3 vanillaResolved,
-            Entity self,
-            AABB startBB,
-            float stepHeight
-    ) {
-        Vec3 outWorld = vanillaResolved;
-        AABB workingBB = startBB;
+    private static final double TICK_DT = 1.0 / 20.0;
 
-        List<DynamicConstruct> nearby = ConstructManager.INSTANCE
-                .getNearbyConstructs(self.level().dimension(), self.position(), 3);
+    public static Vec3 resolveCollisions(Vec3 vanillaResolved, Entity self, AABB startBB, float stepHeight) {
+        // 0) Preserve identity when vanilla gave zero
+        if (vanillaResolved.lengthSqr() <= 1e-18) return vanillaResolved;
 
-        for (DynamicConstruct construct : nearby) {
-            Optional<ConstructCollisionManager.Planes> opt = ConstructCollisionManager.get(construct.getId());
-            if (opt.isEmpty()) continue;
+        final double dt = TICK_DT;
 
-            if (!expandByMotion(workingBB, outWorld).intersects(construct.getRenderBoundingBox())) continue;
+        // 1) Player OBB at end pose (we’ll project from here)
+        OBB playerEnd = playerObbFromAabb(startBB.move(vanillaResolved.x, vanillaResolved.y, vanillaResolved.z));
 
-            // World -> local
-            Quaternionf invRot = new Quaternionf(construct.getRotation()).invert();
-//            AABB localBB = rotateAABB(workingBB.move(construct.getPosition().scale(-1)), invRot);
-//            Vec3 desiredLocal = rotateVec(outWorld, invRot);
-            AABB localBB = workingBB.move(ConstructManager.INSTANCE.getRenderPosFromSim(construct.getId(),new Vec3(construct.getSimOrigin().getX(), construct.getSimOrigin().getY(), construct.getSimOrigin().getZ())).scale(-1));
-            Vec3 desiredLocal = outWorld;
+        // 2) Nearby constructs
+        AABB swept = startBB.expandTowards(vanillaResolved.x, vanillaResolved.y, vanillaResolved.z);
+        List<ConstructCollisionManager.ConstructRef> near = ConstructCollisionManager.queryNearby(self.level(), swept);
+        if (near.isEmpty()) return vanillaResolved;
 
-            // Push-out even if desiredLocal == 0
-            Vec3 correctedLocal = resolveAgainstConstruct(construct, desiredLocal, self, localBB, stepHeight);
+        // 3) Build end-of-tick world poses for constructs
+        List<WorldConstruct> worldTargets = new ArrayList<>(near.size());
+        for (ConstructCollisionManager.ConstructRef ref : near) {
+            RigidState endPose = integratePose(ref.state(), dt);
+            worldTargets.add(new WorldConstruct(ref, endPose));
+        }
 
-            if (!correctedLocal.equals(desiredLocal)) {
-                Vec3 correctedWorld = rotateVec(correctedLocal, construct.getRotation());
-                Vec3 delta = correctedWorld.subtract(outWorld);
-                if (!delta.equals(Vec3.ZERO)) {
-                    workingBB = workingBB.move(delta.x, delta.y, delta.z);
-                    outWorld = correctedWorld;
+        // 4) Platform carry (unchanged logic; includes rotation carry)
+        V3 platformCarry = estimatePlatformCarry(playerEnd, worldTargets, dt);
+        if (platformCarry.len2() > 0) {
+            playerEnd.c.add(platformCarry);
+        }
+
+        // 5) Gather SDF contacts (entity vs each construct)
+        ArrayList<Contact> cons = new ArrayList<>(32);
+        for (WorldConstruct wc : worldTargets) {
+            gatherSdfContactsEntityVsConstruct(playerEnd, wc, cons);
+        }
+
+        // 6) Min-norm push d that satisfies: n_i · d >= depth_i  (no magnitude bias)
+        V3 d = solveMinNormFromContacts(cons);
+
+        // 7) Compose final result = vanilla + carry + push
+        double rx = vanillaResolved.x + platformCarry.x + d.x;
+        double ry = vanillaResolved.y + platformCarry.y + d.y;
+        double rz = vanillaResolved.z + platformCarry.z + d.z;
+
+        // 8) Preserve Y identity if numerically equal to avoid vanilla vertical reset
+        if (Math.abs(ry - vanillaResolved.y) <= 1e-12
+                && Math.abs(platformCarry.y) <= 1e-12
+                && Math.abs(d.y) <= 1e-12) {
+            ry = vanillaResolved.y;
+        }
+
+        // 9) If unchanged, return original instance
+        if (rx == vanillaResolved.x && ry == vanillaResolved.y && rz == vanillaResolved.z) {
+            return vanillaResolved;
+        }
+        return new Vec3(rx, ry, rz);
+    }
+
+    /** Contact constraint primitive for min-norm projection. */
+    private static final class Contact {
+        final V3 n;      // world normal, A->B
+        final double d;  // penetration depth (>=0)
+        Contact(V3 n, double d){ this.n = n; this.d = d; }
+    }
+
+    /** Sample corners + face-centers of the player OBB against a construct’s SDF and emit contacts. */
+    private static void gatherSdfContactsEntityVsConstruct(OBB playerEnd,
+                                                           WorldConstruct wc,
+                                                           List<Contact> out)
+    {
+        if (wc.ref.sdf() == null) return;
+
+        // Sample set on player OBB
+        ArrayList<V3> pts = new ArrayList<>(14);
+        int[] S = { -1, +1 };
+        for (int sx : S) for (int sy : S) for (int sz : S)
+            pts.add(new V3(playerEnd.c.x + sx*playerEnd.e.x,
+                    playerEnd.c.y + sy*playerEnd.e.y,
+                    playerEnd.c.z + sz*playerEnd.e.z));
+        pts.add(new V3(playerEnd.c.x + playerEnd.e.x, playerEnd.c.y,                playerEnd.c.z               ));
+        pts.add(new V3(playerEnd.c.x - playerEnd.e.x, playerEnd.c.y,                playerEnd.c.z               ));
+        pts.add(new V3(playerEnd.c.x,                 playerEnd.c.y + playerEnd.e.y,playerEnd.c.z               ));
+        pts.add(new V3(playerEnd.c.x,                 playerEnd.c.y - playerEnd.e.y,playerEnd.c.z               ));
+        pts.add(new V3(playerEnd.c.x,                 playerEnd.c.y,                playerEnd.c.z + playerEnd.e.z));
+        pts.add(new V3(playerEnd.c.x,                 playerEnd.c.y,                playerEnd.c.z - playerEnd.e.z));
+
+        // World->Local transforms
+        VoxelSDF sdf = wc.ref.sdf();
+        M3 R = wc.endPose.rot;      // world-from-local
+        M3 Rt = R.transpose();      // local-from-world
+        V3 pos = wc.endPose.pos;
+        V3 o   = wc.ref.localOrigin();
+
+        for (V3 xW : pts) {
+            V3 xWL = V3.sub(xW, pos);
+            V3 xL  = Rt.mul(xWL).add(o);
+
+            double phi = sdf.sample(xL);
+            if (phi >= 0.0) continue; // outside
+
+            V3 gL = sdf.grad(xL);
+            if (gL.len2() < 1e-12) continue;
+            V3 nW = R.mul(gL).nor();           // A->B world normal
+
+            double depth = -phi;
+            out.add(new Contact(nW, depth));
+        }
+    }
+
+    /** Min-norm solution: find d with minimum ||d|| s.t. n_i·d >= depth_i for all contacts. */
+    private static V3 solveMinNormFromContacts(List<Contact> cons){
+        if (cons.isEmpty()) return new V3();
+
+        // Active-set with tiny systems: grow by most violated, solve normal equations, project.
+        final int MAX_PASSES = 8;
+
+        // active set storage
+        ArrayList<Contact> active = new ArrayList<>(8);
+        V3 d = new V3();
+
+        for (int pass=0; pass<MAX_PASSES; pass++){
+            // Find most violated
+            double maxGap = 0.0; int worst = -1;
+            for (int i=0;i<cons.size();i++){
+                Contact c = cons.get(i);
+                double gap = c.d - c.n.dot(d);
+                if (gap > maxGap + 1e-9){ maxGap = gap; worst = i; }
+            }
+            if (worst < 0) break; // all satisfied
+
+            // Add if not parallel duplicate
+            Contact add = cons.get(worst);
+            boolean dup = false;
+            for (Contact a : active){ if (a.n.dot(add.n) > 0.999) { dup=true; break; } }
+            if (!dup) active.add(add);
+
+            // Solve (M M^T) λ = depths, d = M^T λ
+            int k = active.size();
+            double[][] G = new double[k][k];
+            double[]    b = new double[k];
+            for (int i=0;i<k;i++){
+                b[i] = active.get(i).d;
+                for (int j=0;j<k;j++){
+                    G[i][j] = active.get(i).n.dot(active.get(j).n);
+                }
+                G[i][i] += 1e-8; // regularization
+            }
+            double[] lam = gaussianSolve(G, b);
+
+            // If any λ < 0, drop the most negative (KKT enforcement) and recompute.
+            int guard=0;
+            while (hasNegative(lam) && guard++ < k+2) {
+                int worstIdx = argMostNegative(lam);
+                active.remove(worstIdx);
+                k = active.size();
+                if (k==0){ d = new V3(); break; }
+
+                G = new double[k][k];
+                b = new double[k];
+                for (int i=0;i<k;i++){
+                    b[i] = active.get(i).d;
+                    for (int j=0;j<k;j++){
+                        G[i][j] = active.get(i).n.dot(active.get(j).n);
+                    }
+                    G[i][i] += 1e-8;
+                }
+                lam = gaussianSolve(G, b);
+            }
+
+            // Build d
+            d = new V3();
+            for (int i=0;i<active.size();i++){
+                d.add( V3.scl(active.get(i).n.cpy(), lam[i]) );
+            }
+        }
+        return d;
+    }
+
+    /** Tiny dense Gaussian solver (with partial pivot). */
+    private static double[] gaussianSolve(double[][] A, double[] b){
+        int n = b.length;
+        double[][] M = new double[n][n+1];
+        for (int i=0;i<n;i++){
+            System.arraycopy(A[i], 0, M[i], 0, n);
+            M[i][n] = b[i];
+        }
+        int row=0;
+        for (int col=0; col<n && row<n; col++){
+            int piv=row;
+            for (int r=row+1;r<n;r++) if (Math.abs(M[r][col]) > Math.abs(M[piv][col])) piv=r;
+            if (Math.abs(M[piv][col]) < 1e-12) continue;
+            double[] tmp = M[row]; M[row]=M[piv]; M[piv]=tmp;
+
+            double inv = 1.0 / M[row][col];
+            for (int c=col;c<=n;c++) M[row][c] *= inv;
+
+            for (int r=0;r<n;r++){
+                if (r==row) continue;
+                double f = M[r][col];
+                if (Math.abs(f) < 1e-20) continue;
+                for (int c=col;c<=n;c++) M[r][c] -= f * M[row][c];
+            }
+            row++;
+        }
+        double[] x = new double[n];
+        for (int i=0;i<n;i++) x[i] = M[i][n];
+        return x;
+    }
+    private static boolean hasNegative(double[] a){ for (double v : a) if (v < -1e-9) return true; return false; }
+    private static int argMostNegative(double[] a){ int idx=0; double mn=a[0]; for (int i=1;i<a.length;i++){ if (a[i] < mn){ mn=a[i]; idx=i; } } return idx; }
+
+    private static RigidState cloneState(RigidState s){
+        RigidState r = new RigidState();
+        r.set(s.pos.cpy(), new M3().set(s.rot.c0, s.rot.c1, s.rot.c2),
+                s.vLin.cpy(), s.vAng.cpy(), s.invMass, s.invInertiaWorld);
+        return r;
+    }
+
+    private static OBB playerObbFromAabb(AABB bb) {
+        OBB o = new OBB();
+        o.c = aabbCenter(bb);
+        o.e = new V3((bb.maxX - bb.minX) * 0.5, (bb.maxY - bb.minY) * 0.5, (bb.maxZ - bb.minZ) * 0.5);
+        o.R = M3.identity(); // player box axis-aligned for now
+        o.mu = 0.8;
+        return o;
+    }
+
+    private static V3 aabbCenter(AABB bb) {
+        return new V3((bb.minX + bb.maxX) * 0.5, (bb.minY + bb.maxY) * 0.5, (bb.minZ + bb.maxZ) * 0.5);
+        // could add: + small epsilon tweaks if Minecraft AABB has odd rounding
+    }
+
+    /** End-of-tick small-angle integration for a kinematic/rigid pose. */
+    private static RigidState integratePose(RigidState s, double dt) {
+        RigidState r = cloneState(s);
+        // translate by v*dt
+        r.pos.add(V3.scl(r.vLin.cpy(), dt));
+        // small-angle rotate basis by ω×axis*dt
+        if (r.vAng.len2() > 1e-18) {
+            V3 wx = r.vAng;
+            V3 X = r.rot.c0.cpy(), Y = r.rot.c1.cpy(), Z = r.rot.c2.cpy();
+            r.rot.c0.add(wx.crs(X).scl(dt)).nor();
+            r.rot.c1.add(wx.crs(Y).scl(dt)).nor();
+            r.rot.c2.add(wx.crs(Z).scl(dt)).nor();
+        }
+        return r;
+    }
+
+    /** Carry from constructs touching/under the player at end pose. Includes linear + rotational. */
+    private static V3 estimatePlatformCarry(OBB playerEnd, List<WorldConstruct> worldTargets, double dt) {
+        // Consider support when the MTV (A->B normal) points sufficiently downward.
+        // Using -0.2 handles rotated/sloped platforms reliably.
+        final double DOWN_THRESHOLD = -0.2;
+
+        V3 sum = new V3();
+        int cnt = 0;
+
+        for (WorldConstruct wc : worldTargets) {
+            // very cheap broad check
+            if (V3.sub(wc.centerApprox(), playerEnd.c).len2() > 256.0) continue;
+
+            for (OBB bLocal : wc.ref.localObbs()) {
+                OBB bWorld = obbAtPoseB_local(bLocal, wc.endPose, wc.ref.localOrigin());
+                dev.manifold.physics.narrowphase.ObbSat.OverlapResult r =
+                        dev.manifold.physics.narrowphase.ObbSat.test(playerEnd, bWorld);
+                if (!r.overlaps || r.depth <= 1e-9) continue;
+
+                if (r.nWorld.y < DOWN_THRESHOLD) {
+                    // Evaluate platform velocity at player center (good enough for carry)
+                    V3 rB = V3.sub(playerEnd.c, wc.endPose.pos);
+                    V3 vPoint = V3.add(wc.endPose.vLin.cpy(), wc.endPose.vAng.cpy().crs(rB));
+                    sum.add(vPoint);
+                    cnt++;
+                    break; // one OBB per construct is enough for carry
                 }
             }
         }
 
-        return outWorld;
+        if (cnt == 0) return new V3();
+        sum.scl(1.0 / cnt);
+        return V3.scl(sum, dt); // return displacement for this tick
     }
 
-    public static Vec3 resolveAgainstConstruct(
-            DynamicConstruct construct,
-            Vec3 desiredLocal,     // request in construct-local space
-            Entity self,
-            AABB startBBLocal,     // AABB already translated+rotated into construct-local
-            float stepHeight
-    ) {
-        Optional<ConstructCollisionManager.Planes> opt = ConstructCollisionManager.get(construct.getId());
-        if (opt.isEmpty()) return desiredLocal;
-        ConstructCollisionManager.Planes planes = opt.get();
-        // 1) Pre-advance to the requested position
-        AABB moved = startBBLocal;
-        Vec3 deltaMovement = self.getDeltaMovement();
+    /** Transform B’s LOCAL OBB by its world pose and local origin: world = pos + R*(local - origin). */
+    private static OBB obbAtPoseB_local(OBB local, RigidState pose, V3 localOrigin){
+        OBB w = new OBB();
 
-        // 2) One-shot anti-penetration opposite to the incoming velocity
-        //    (prevents “prefer Y” when flying into a 1-block-tall platform side)
-        double penX = pushOutX_independent(moved, planes, deltaMovement.x);
-        double penY = pushOutY_independent(moved, planes, deltaMovement.y);
-        double penZ = pushOutZ_independent(moved, planes, deltaMovement.z);
+        // world center = pos + R * (local.c - origin)
+        V3 lc = V3.sub(local.c, localOrigin);
+        V3 wx = pose.rot.c0, wy = pose.rot.c1, wz = pose.rot.c2;
+        V3 wc = new V3(
+                pose.pos.x + wx.x*lc.x + wy.x*lc.y + wz.x*lc.z,
+                pose.pos.y + wx.y*lc.x + wy.y*lc.y + wz.y*lc.z,
+                pose.pos.z + wx.z*lc.x + wy.z*lc.y + wz.z*lc.z
+        );
 
-        double antiX = 0.0, antiY = 0.0, antiZ = 0.0;
-        if (penX != 0.0 && Math.signum(penX) == -Math.signum(desiredLocal.x)) antiX = penX;
-        if (penY != 0.0 && Math.signum(penY) == -Math.signum(desiredLocal.y)) antiY = penY;
-        if (penZ != 0.0 && Math.signum(penZ) == -Math.signum(desiredLocal.z)) antiZ = penZ;
+        // world rotation = pose.rot * local.R
+        V3 lx = local.R.c0, ly = local.R.c1, lz = local.R.c2;
+        V3 rx = new V3(
+                wx.x*lx.x + wy.x*lx.y + wz.x*lx.z,
+                wx.y*lx.x + wy.y*lx.y + wz.y*lx.z,
+                wx.z*lx.x + wy.z*lx.y + wz.z*lx.z
+        );
+        V3 ry = new V3(
+                wx.x*ly.x + wy.x*ly.y + wz.x*ly.z,
+                wx.y*ly.x + wy.y*ly.y + wz.y*ly.z,
+                wx.z*ly.x + wy.z*ly.y + wz.z*ly.z
+        );
+        V3 rz = new V3(
+                wx.x*lz.x + wy.x*lz.y + wz.x*lz.z,
+                wx.y*lz.x + wy.y*lz.y + wz.y*lz.z,
+                wx.z*lz.x + wy.z*lz.y + wz.z*lz.z
+        );
 
-        if (antiX != 0.0 || antiY != 0.0 || antiZ != 0.0) {
-            // Move geometry out of penetration...
-            moved = moved.move(antiX, antiY, antiZ);
-            // ...but pull the *requested* motion back so the end pose is unchanged.
-            desiredLocal = new Vec3(desiredLocal.x - antiX, desiredLocal.y - antiY, desiredLocal.z - antiZ);
-        }
-
-        // 3) Split motion into components and resolve each independently
-        double outX = 0.0, outY = 0.0, outZ = 0.0;
-
-        // X component
-        if (desiredLocal.x != 0.0) {
-            AABB afterX = moved.move(desiredLocal.x, 0.0, 0.0);
-            double pushX = pushOutX_independent(afterX, planes, /*useLedgeEps*/  deltaMovement.x);
-            // Only accept a push that negates penetration along the direction we moved
-            if (pushX != 0.0 && Math.signum(pushX) == -Math.signum(desiredLocal.x)) {
-                outX = desiredLocal.x + pushX;
-                moved = afterX.move(pushX, 0.0, 0.0);
-            } else {
-                outX = desiredLocal.x;
-                moved = afterX; // no correction needed
-            }
-        }
-
-        // Y component (usually what keeps you on top, already unbiased by the split)
-        if (desiredLocal.y != 0.0) {
-            AABB afterY = moved.move(0.0, desiredLocal.y, 0.0);
-            double pushY = pushOutY_independent(afterY, planes, deltaMovement.y);
-            if (pushY != 0.0 && Math.signum(pushY) == -Math.signum(desiredLocal.y)) {
-                outY = desiredLocal.y + pushY;
-                moved = afterY.move(0.0, pushY, 0.0);
-            } else {
-                outY = desiredLocal.y;
-                moved = afterY;
-            }
-        }
-
-        // Z component
-        if (desiredLocal.z != 0.0) {
-            AABB afterZ = moved.move(0.0, 0.0, desiredLocal.z);
-            double pushZ = pushOutZ_independent(afterZ, planes, /*useLedgeEps*/  deltaMovement.z);
-            if (pushZ != 0.0 && Math.signum(pushZ) == -Math.signum(desiredLocal.z)) {
-                outZ = desiredLocal.z + pushZ;
-                moved = afterZ.move(0.0, 0.0, pushZ);
-            } else {
-                outZ = desiredLocal.z;
-                moved = afterZ;
-            }
-        }
-
-        return new Vec3(outX, outY, outZ);
+        w.c = wc;
+        w.R.set(rx, ry, rz);
+        w.e.set(local.e);
+        w.mu = local.mu; w.restitution = local.restitution; w.id = local.id;
+        return w;
     }
 
-    /* ======================= Push-out helpers (handle zero-motion too) ======================= */
 
-    /** Choose the non-zero with the smaller magnitude; if only one is non-zero, return it; else 0. */
-    private static double pickBestSigned(double pos, double neg) {
-        if (pos != 0.0 && neg != 0.0) return Math.abs(pos) <= Math.abs(neg) ? pos : neg;
-        return pos != 0.0 ? pos : (neg != 0.0 ? neg : 0.0);
-    }
-
-    /** Minimal signed Y displacement to separate 'bb' from UP/DOWN planes. */
-    private static double pushOutY_independent(AABB bb, ConstructCollisionManager.Planes planes, double yDelta) {
-        double pushUp = 0.0;  // +Y
-        double pushDn = 0.0;  // -Y
-
-        for (CollisionPlane.Rect r : planes.rects(Direction.UP)) {
-            final double y = r.depth / (double)GRID;
-            final double u0 = r.u0 / (double)GRID, u1 = r.u1 / (double)GRID;
-            final double v0 = r.v0 / (double)GRID, v1 = r.v1 / (double)GRID;
-
-            if (y <= bb.minY || y >= bb.maxY - yDelta) continue;
-            if (notOverlap1D(bb.minX, bb.maxX, u0, u1)) continue;
-            if (notOverlap1D(bb.minZ, bb.maxZ, v0, v1)) continue;
-
-            double candUp = (y - bb.minY) + SKIN;
-            double candDn = (y - (bb.maxY + yDelta)) - SKIN;
-            if (candUp > 0.0 && (pushUp == 0.0 || candUp < pushUp)) pushUp = candUp;
-            if (candDn < 0.0 && (pushDn == 0.0 || candDn > pushDn)) pushDn = candDn;
+    /**
+     * Minimal wrapper so we keep ref + computed end pose together.
+     */
+        private record WorldConstruct(ConstructCollisionManager.ConstructRef ref, RigidState endPose) {
+        V3 centerApprox() {
+            return endPose.pos;
         }
-
-        for (CollisionPlane.Rect r : planes.rects(Direction.DOWN)) {
-            final double y = r.depth / (double)GRID;
-            final double u0 = r.u0 / (double)GRID, u1 = r.u1 / (double)GRID;
-            final double v0 = r.v0 / (double)GRID, v1 = r.v1 / (double)GRID;
-
-            if (y <= bb.minY - yDelta || y >= bb.maxY) continue;
-            if (notOverlap1D(bb.minX, bb.maxX, u0, u1)) continue;
-            if (notOverlap1D(bb.minZ, bb.maxZ, v0, v1)) continue;
-
-            double candUp = (y - (bb.minY + yDelta)) + SKIN;
-            double candDn = (y - bb.maxY) - SKIN;
-            if (candUp > 0.0 && (pushUp == 0.0 || candUp < pushUp)) pushUp = candUp;
-            if (candDn < 0.0 && (pushDn == 0.0 || candDn > pushDn)) pushDn = candDn;
         }
-
-        return pickBestSigned(pushUp, pushDn);
-    }
-
-    /** Minimal signed X displacement to separate 'bb' from EAST/WEST planes. */
-    private static double pushOutX_independent(AABB bb, ConstructCollisionManager.Planes planes, double xDelta) {
-        double pushRt = 0.0;  // +X
-        double pushLt = 0.0;  // -X
-        final double yMinForSide = (bb.minY + LEDGE_EPS);
-
-        for (CollisionPlane.Rect r : planes.rects(Direction.EAST)) {
-            final double x = r.depth / (double)GRID;
-            final double u0 = r.u0 / (double)GRID, u1 = r.u1 / (double)GRID;
-            final double v0 = r.v0 / (double)GRID, v1 = r.v1 / (double)GRID;
-
-            if (x <= bb.minX || x >= bb.maxX - xDelta) continue;
-            if (notOverlap1D(bb.minZ, bb.maxZ, u0, u1)) continue;
-            if (notOverlap1D(yMinForSide, bb.maxY, v0, v1)) continue;
-
-            double candRt = (x - bb.minX) + SKIN;
-            double candLt = (x - (bb.maxX + xDelta)) - SKIN;
-            if (candRt > 0.0 && (pushRt == 0.0 || candRt < pushRt)) pushRt = candRt;
-            if (candLt < 0.0 && (pushLt == 0.0 || candLt > pushLt)) pushLt = candLt;
-        }
-
-        for (CollisionPlane.Rect r : planes.rects(Direction.WEST)) {
-            final double x = r.depth / (double)GRID;
-            final double u0 = r.u0 / (double)GRID, u1 = r.u1 / (double)GRID;
-            final double v0 = r.v0 / (double)GRID, v1 = r.v1 / (double)GRID;
-
-            if (x <= bb.minX - xDelta || x >= bb.maxX) continue;
-            if (notOverlap1D(bb.minZ, bb.maxZ, u0, u1)) continue;
-            if (notOverlap1D(yMinForSide, bb.maxY, v0, v1)) continue;
-
-            double candRt = (x - (bb.minX + xDelta)) + SKIN;
-            double candLt = (x - bb.maxX) - SKIN;
-            if (candRt > 0.0 && (pushRt == 0.0 || candRt < pushRt)) pushRt = candRt;
-            if (candLt < 0.0 && (pushLt == 0.0 || candLt > pushLt)) pushLt = candLt;
-        }
-
-        return pickBestSigned(pushRt, pushLt);
-    }
-
-    /** Minimal signed Z displacement to separate 'bb' from SOUTH/NORTH planes. */
-    private static double pushOutZ_independent(AABB bb, ConstructCollisionManager.Planes planes, double zDelta) {
-        double pushFwd = 0.0; // +Z
-        double pushBak = 0.0; // -Z
-        final double yMinForSide = (bb.minY + LEDGE_EPS);
-
-        for (CollisionPlane.Rect r : planes.rects(Direction.SOUTH)) {
-            final double z = r.depth / (double)GRID;
-            final double u0 = r.u0 / (double)GRID, u1 = r.u1 / (double)GRID;
-            final double v0 = r.v0 / (double)GRID, v1 = r.v1 / (double)GRID;
-
-            if (z <= bb.minZ || z >= bb.maxZ - zDelta) continue;
-            if (notOverlap1D(bb.minX, bb.maxX, u0, u1)) continue;
-            if (notOverlap1D(yMinForSide, bb.maxY, v0, v1)) continue;
-
-            double candF = (z - bb.minZ) + SKIN;
-            double candB = (z - (bb.maxZ + zDelta)) - SKIN;
-            if (candF > 0.0 && (pushFwd == 0.0 || candF < pushFwd)) pushFwd = candF;
-            if (candB < 0.0 && (pushBak == 0.0 || candB > pushBak)) pushBak = candB;
-        }
-
-        for (CollisionPlane.Rect r : planes.rects(Direction.NORTH)) {
-            final double z = r.depth / (double)GRID;
-            final double u0 = r.u0 / (double)GRID, u1 = r.u1 / (double)GRID;
-            final double v0 = r.v0 / (double)GRID, v1 = r.v1 / (double)GRID;
-
-            if (z <= bb.minZ - zDelta || z >= bb.maxZ) continue;
-            if (notOverlap1D(bb.minX, bb.maxX, u0, u1)) continue;
-            if (notOverlap1D(yMinForSide, bb.maxY, v0, v1)) continue;
-
-            double candF = (z - (bb.minZ + zDelta)) + SKIN;
-            double candB = (z - bb.maxZ) - SKIN;
-            if (candF > 0.0 && (pushFwd == 0.0 || candF < pushFwd)) pushFwd = candF;
-            if (candB < 0.0 && (pushBak == 0.0 || candB > pushBak)) pushBak = candB;
-        }
-
-        return pickBestSigned(pushFwd, pushBak);
-    }
-
-    /* -------- small utilities (unchanged) -------- */
-
-    /** 1D interval overlap, treating rects as half-open [b0,b1) and the AABB as closed. */
-    private static boolean notOverlap1D(double a0, double a1, double b0, double b1) {
-        return !(a1 > b0) || !(b1 > a0);
-    }
-
-    private static AABB expandByMotion(AABB box, Vec3 motion) {
-        double minX = motion.x < 0 ? box.minX + motion.x : box.minX;
-        double maxX = motion.x > 0 ? box.maxX + motion.x : box.maxX;
-        double minY = motion.y < 0 ? box.minY + motion.y : box.minY;
-        double maxY = motion.y > 0 ? box.maxY + motion.y : box.maxY;
-        double minZ = motion.z < 0 ? box.minZ + motion.z : box.minZ;
-        double maxZ = motion.z > 0 ? box.maxZ + motion.z : box.maxZ;
-        return new AABB(minX, minY, minZ, maxX, maxY, maxZ);
-    }
-
-    private static Vec3 rotateVec(Vec3 v, Quaternionf qf) {
-        // Fast path: exact identity (or extremely close)
-        if (Math.abs(qf.x) < 1e-15 && Math.abs(qf.y) < 1e-15 &&
-                Math.abs(qf.z) < 1e-15 && Math.abs(1.0f - qf.w) < 1e-15) {
-            return v;
-        }
-
-        // Use double-precision quaternion rotation:
-        // t = 2 * (q.xyz × v)
-        // v' = v + q.w * t + (q.xyz × t)
-        double x = v.x, y = v.y, z = v.z;
-        double qx = qf.x, qy = qf.y, qz = qf.z, qw = qf.w;
-
-        // Normalize if needed (cheap guard against drift)
-        double n = Math.sqrt(qx*qx + qy*qy + qz*qz + qw*qw);
-        if (Math.abs(n - 1.0) > 1e-12 && n > 0.0) {
-            qx /= n; qy /= n; qz /= n; qw /= n;
-        }
-
-        double tx = 2.0 * (qy * z - qz * y);
-        double ty = 2.0 * (qz * x - qx * z);
-        double tz = 2.0 * (qx * y - qy * x);
-
-        double rx = x + qw * tx + (qy * tz - qz * ty);
-        double ry = y + qw * ty + (qz * tx - qx * tz);
-        double rz = z + qw * tz + (qx * ty - qy * tx);
-
-        return new Vec3(rx, ry, rz);
-    }
-
-    public static AABB rotateAABB(AABB box, Quaternionf q) {
-        // Use the double-precision rotateVec above for each corner
-        Vec3[] corners = {
-                new Vec3(box.minX, box.minY, box.minZ),
-                new Vec3(box.minX, box.minY, box.maxZ),
-                new Vec3(box.minX, box.maxY, box.minZ),
-                new Vec3(box.minX, box.maxY, box.maxZ),
-                new Vec3(box.maxX, box.minY, box.minZ),
-                new Vec3(box.maxX, box.minY, box.maxZ),
-                new Vec3(box.maxX, box.maxY, box.minZ),
-                new Vec3(box.maxX, box.maxY, box.maxZ),
-        };
-
-        double minX = Double.POSITIVE_INFINITY, minY = Double.POSITIVE_INFINITY, minZ = Double.POSITIVE_INFINITY;
-        double maxX = Double.NEGATIVE_INFINITY, maxY = Double.NEGATIVE_INFINITY, maxZ = Double.NEGATIVE_INFINITY;
-
-        for (Vec3 c : corners) {
-            Vec3 r = rotateVec(c, q); // << double-precision rotation
-            if (r.x < minX) minX = r.x; if (r.x > maxX) maxX = r.x;
-            if (r.y < minY) minY = r.y; if (r.y > maxY) maxY = r.y;
-            if (r.z < minZ) minZ = r.z; if (r.z > maxZ) maxZ = r.z;
-        }
-        return new AABB(minX, minY, minZ, maxX, maxY, maxZ);
-    }
 }
