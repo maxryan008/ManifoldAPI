@@ -58,58 +58,48 @@ public class ConstructManager {
     }
 
     public static VoxelSDF buildLocalSdfFromSimArea(ServerLevel sim,
-                                                     BlockPos simOrigin,
-                                                     BlockPos neg, BlockPos pos) {
-        // Collect all solid block centers in local space
+                                                    BlockPos simOrigin,
+                                                    BlockPos neg, BlockPos pos) {
         ArrayList<V3> solids = new ArrayList<>();
         for (int x = neg.getX(); x <= pos.getX(); x++) {
             for (int y = neg.getY(); y <= pos.getY(); y++) {
                 for (int z = neg.getZ(); z <= pos.getZ(); z++) {
-                    BlockPos rel = new BlockPos(x, y, z);
-                    BlockPos abs = simOrigin.offset(rel);
+                    BlockPos abs = simOrigin.offset(x, y, z);
                     if (!sim.getBlockState(abs).isAir()) {
-                        // local center of the unit block at (x,y,z)
-                        solids.add(new V3(x + 0.5, y + 0.5, z + 0.5));
+                        solids.add(new V3(x + 0.5, y + 0.5, z + 0.5)); // block centers
                     }
                 }
             }
         }
 
-        // Define a node grid on integer coordinates that spans the [neg..pos] block region,
-        // plus a 1-cell shell so trilinear samples near the boundary are well-defined.
+        // grid spans [neg..pos] plus 1-cell shell, but **at cell centers**
         int nx = (pos.getX() - neg.getX() + 1) + 1;
         int ny = (pos.getY() - neg.getY() + 1) + 1;
         int nz = (pos.getZ() - neg.getZ() + 1) + 1;
 
-        V3 origin = new V3(neg.getX(), neg.getY(), neg.getZ()); // grid node (0,0,0) is at local (negX,negY,negZ)
+        // IMPORTANT: origin is the cell-center at neg corner
+        V3 origin = new V3(neg.getX() + 0.5, neg.getY() + 0.5, neg.getZ() + 0.5);
         float[][][] phi = new float[nx][ny][nz];
 
-        // Precompute signed distance at each grid node to the union of blocks.
-        // SDF to union of boxes is: phi(p) = min_i sdf_box(p, center_i, e=(0.5,0.5,0.5))
-        // Positive outside, negative inside.
         V3 e = new V3(0.5, 0.5, 0.5);
-
         for (int i = 0; i < nx; i++) {
-            double px = origin.x + i; // node coordinate (integer)
+            double px = origin.x + i; // centers, not corners
             for (int j = 0; j < ny; j++) {
                 double py = origin.y + j;
                 for (int k = 0; k < nz; k++) {
                     double pz = origin.z + k;
 
                     double best = Double.POSITIVE_INFINITY;
-                    // If no solids, keep it "outside"
                     for (int s = 0; s < solids.size(); s++) {
                         V3 c = solids.get(s);
-                        double d = sdfBox(px, py, pz, c, e); // exact SDF to axis-aligned box
+                        double d = sdfBox(px, py, pz, c, e);
                         if (d < best) best = d;
                     }
-                    // If there were no solids, best stays +INF; clamp to a large positive
                     if (best == Double.POSITIVE_INFINITY) best = 1e3;
                     phi[i][j][k] = (float) best;
                 }
             }
         }
-
         return new VoxelSDF(phi, origin);
     }
 
@@ -764,12 +754,16 @@ public class ConstructManager {
     }
 
     /** Builds simple per-block local OBBs for all non-air blocks in [neg..pos] around simOrigin. */
-    public static List<OBB> buildLocalObbsFromSimArea(ServerLevel sim,
-                                                      BlockPos simOrigin,
-                                                      BlockPos neg, BlockPos pos,
-                                                      double defaultMu) {
+    public static List<OBB> buildLocalObbsFromSimArea(
+            ServerLevel sim,
+            BlockPos simOrigin,
+            BlockPos neg,
+            BlockPos pos,
+            double defaultMu
+    ) {
         ArrayList<OBB> out = new ArrayList<>();
         int id = 0;
+
         for (int x = neg.getX(); x <= pos.getX(); x++) {
             for (int y = neg.getY(); y <= pos.getY(); y++) {
                 for (int z = neg.getZ(); z <= pos.getZ(); z++) {
@@ -778,19 +772,37 @@ public class ConstructManager {
                     BlockState bs = sim.getBlockState(abs);
                     if (bs.isAir()) continue;
 
-                    // Local-space AABB block => local OBB
+                    // Estimate friction μ from the block (ice < dirt < stone etc.)
+                    double mu = estimateMu(sim, abs, bs, defaultMu);
+
                     OBB o = new OBB();
-                    o.c = new V3(x + 0.5, y + 0.5, z + 0.5);
-                    o.e = new V3(0.5, 0.5, 0.5);
-                    o.R = M3.identity();
-                    // TODO: use real material μ from block if desired
-                    o.mu = defaultMu;
+                    o.c = new V3(x + 0.5, y + 0.5, z + 0.5);   // local center in construct-space
+                    o.e = new V3(0.5, 0.5, 0.5);               // half extents of a cube voxel
+                    o.R = M3.identity();                        // axis-aligned in LOCAL space; world rotation comes from the construct
+                    o.mu = mu;
                     o.id = id++;
                     out.add(o);
                 }
             }
         }
+
+        if (out.isEmpty()) {
+            // One tiny sentinel so BVH has a valid node; will be culled by broadphase anyway.
+            out.add(new OBB(new V3(0, 0, 0), new V3(1e-4, 1e-4, 1e-4), M3.identity(), defaultMu, -1));
+        }
         return out;
+    }
+
+    /** Roughly map Minecraft block "slipperiness/friction" into a Coulomb μ for sliding logic. */
+    private static double estimateMu(ServerLevel sim, BlockPos pos, BlockState state, double fallback) {
+        try {
+            float f = state.getBlock().getFriction();
+            double mu = Math.max(0.02, Math.min(1.2, 1.4 - (double) f * 1.2));
+            return mu;
+        } catch (Throwable ignored) { }
+
+        // Last resort
+        return fallback;
     }
 
     /** Build a RigidState from DynamicConstruct’s pose + velocities. */

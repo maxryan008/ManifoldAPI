@@ -2,52 +2,41 @@ package dev.manifold.physics.collision;
 
 import dev.manifold.physics.math.V3;
 
-public final class VoxelSDF {
-    public final float[][][] phi;   // narrow-band or full; values in blocks (+outside, -inside)
-    public final int nx, ny, nz;    // dimensions
-    public final V3 origin;         // local-space position of grid cell (0,0,0) corner
-    public final double h = 1.0;    // voxel size (block)
+public class VoxelSDF {
+    public final float[][][] phi;
+    public final V3 origin;
+    public VoxelSDF(float[][][] phi, V3 origin){ this.phi=phi; this.origin=origin; }
 
-    public VoxelSDF(float[][][] phi, V3 origin){
-        this.phi = phi;
-        this.nx = phi.length;
-        this.ny = phi[0].length;
-        this.nz = phi[0][0].length;
-        this.origin = origin;
+    public double sampleLocal(double x, double y, double z){
+        int i = (int)Math.floor(x - origin.x);
+        int j = (int)Math.floor(y - origin.y);
+        int k = (int)Math.floor(z - origin.z);
+        i = clamp(i, 0, phi.length-1);
+        j = clamp(j, 0, phi[0].length-1);
+        k = clamp(k, 0, phi[0][0].length-1);
+        return phi[i][j][k];
     }
 
-    // Trilinear sample
-    public double sample(V3 xLocal){
-        double fx = (xLocal.x - origin.x)/h;
-        double fy = (xLocal.y - origin.y)/h;
-        double fz = (xLocal.z - origin.z)/h;
-        int i = (int)Math.floor(fx), j = (int)Math.floor(fy), k = (int)Math.floor(fz);
-        double tx = fx - i, ty = fy - j, tz = fz - k;
-        if (i<0||i+1>=nx||j<0||j+1>=ny||k<0||k+1>=nz) return +1e3; // outside SDF band
-        double c000 = phi[i  ][j  ][k  ];
-        double c100 = phi[i+1][j  ][k  ];
-        double c010 = phi[i  ][j+1][k  ];
-        double c110 = phi[i+1][j+1][k  ];
-        double c001 = phi[i  ][j  ][k+1];
-        double c101 = phi[i+1][j  ][k+1];
-        double c011 = phi[i  ][j+1][k+1];
-        double c111 = phi[i+1][j+1][k+1];
-        double c00 = c000*(1-tx) + c100*tx;
-        double c01 = c001*(1-tx) + c101*tx;
-        double c10 = c010*(1-tx) + c110*tx;
-        double c11 = c011*(1-tx) + c111*tx;
-        double c0 = c00*(1-tz) + c01*tz;
-        double c1 = c10*(1-tz) + c11*tz;
-        return c0*(1-ty) + c1*ty;
+    public double sampleWorld(ConstructCollisionManager.ConstructRecord rec, V3 world){
+        // x_local = localOrigin + R^T*(world - p)
+        V3 lw = rec.state.getRotation().transpose()
+                .mul(world.sub(rec.state.getPosition()))
+                .add(rec.localOrigin);
+        return sampleLocal(lw.x, lw.y, lw.z);
     }
 
-    // Central-diff gradient (trilinear-based; h=1 => scale ~1)
-    public V3 grad(V3 xLocal){
-        double eps = 0.5; // one-half voxel for smoother gradient
-        V3 dx = new V3(eps,0,0), dy=new V3(0,eps,0), dz=new V3(0,0,eps);
-        double gx = sample(new V3(xLocal.x+dx.x, xLocal.y, xLocal.z)) - sample(new V3(xLocal.x-dx.x, xLocal.y, xLocal.z));
-        double gy = sample(new V3(xLocal.x, xLocal.y+dy.y, xLocal.z)) - sample(new V3(xLocal.x, xLocal.y-dy.y, xLocal.z));
-        double gz = sample(new V3(xLocal.x, xLocal.y, xLocal.z+dz.z)) - sample(new V3(xLocal.x, xLocal.y, xLocal.z-dz.z));
-        return new V3(gx, gy, gz).scl(1.0/(2.0*eps));
+    public V3 gradientWorld(ConstructCollisionManager.ConstructRecord rec, V3 world){
+        double h = 0.5;
+        double d0 = sampleWorld(rec, world.add(h,0,0));
+        double d1 = sampleWorld(rec, world.add(-h,0,0));
+        double d2 = sampleWorld(rec, world.add(0,h,0));
+        double d3 = sampleWorld(rec, world.add(0,-h,0));
+        double d4 = sampleWorld(rec, world.add(0,0,h));
+        double d5 = sampleWorld(rec, world.add(0,0,-h));
+        V3 g = new V3((d0-d1)/(2*h), (d2-d3)/(2*h), (d4-d5)/(2*h));
+        double L = g.length();
+        return (L<1e-9) ? null : g.scale(1.0/L);
     }
+
+    private static int clamp(int v,int lo,int hi){ return (v<lo)? lo : (v>hi? hi : v); }
 }
