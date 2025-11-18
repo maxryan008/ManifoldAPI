@@ -1,5 +1,6 @@
 package dev.manifold;
 
+import com.mojang.blaze3d.vertex.PoseStack;
 import dev.manifold.gui.MassScreen;
 import dev.manifold.mass.MassManager;
 import dev.manifold.mixin.accessor.LightEngineAccessor;
@@ -193,7 +194,11 @@ public class ManifoldClient implements ClientModInitializer {
             Vec3 camPos = camera.getPosition();
             long now = System.currentTimeMillis();
             float alpha = Mth.clamp((now - lastServerUpdateTime) / (float) SERVER_TICK_MS, 0f, 1f);
-            renderer.renderOutline(Objects.requireNonNull(worldRenderContext.matrixStack()), camPos, alpha);
+
+            PoseStack stack = Objects.requireNonNull(worldRenderContext.matrixStack());
+
+            renderer.renderOutline(stack, camPos, alpha);
+            renderer.renderDebugBoxes(stack, camPos, alpha);
         });
 
         ClientPlayNetworking.registerGlobalReceiver(ConstructSectionDataS2CPacket.TYPE, (packet, context) ->

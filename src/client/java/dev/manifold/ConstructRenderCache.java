@@ -25,6 +25,7 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.LevelChunkSection;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.phys.shapes.Shapes;
 import net.minecraft.world.phys.shapes.VoxelShape;
 import org.jetbrains.annotations.Nullable;
 import org.joml.Matrix4f;
@@ -239,6 +240,75 @@ public class ConstructRenderCache {
         }
 
         stack.popPose();
+    }
+
+    public void renderDebugBoxes(PoseStack stack, Vec3 camPos, float deltaTicks) {
+        if (!markedForRemoval.isEmpty()) {
+            renderSections.keySet().removeAll(markedForRemoval);
+            for (UUID id : markedForRemoval) constructWorld.remove(id);
+            markedForRemoval.clear();
+        }
+
+        var cm = ConstructManager.INSTANCE;
+        if (cm == null) return;
+
+        for (CachedConstruct cached : renderSections.values()) {
+            if (!isCurrentDimension(cached.id)) continue;
+
+            Vec3 interpolatedPos = cached.prevPosition.lerp(cached.currentPosition, deltaTicks);
+            Quaternionf interpolatedRot = new Quaternionf(cached.prevRotation).slerp(cached.currentRotation, deltaTicks);
+            Vec3 com = cached.centerOfMass; // local COM in construct space
+
+            var negOpt = cm.getNegativeBounds(cached.id);
+            var posOpt = cm.getPositiveBounds(cached.id);
+            if (negOpt.isEmpty() || posOpt.isEmpty()) continue;
+
+            BlockPos neg = negOpt.get();
+            BlockPos pos = posOpt.get();
+
+            // Bounds expressed in (r - com) space (same as mesh)
+            double minX = neg.getX() - com.x;
+            double minY = neg.getY() - com.y;
+            double minZ = neg.getZ() - com.z;
+            double maxX = (pos.getX() + 1) - com.x;
+            double maxY = (pos.getY() + 1) - com.y;
+            double maxZ = (pos.getZ() + 1) - com.z;
+
+            stack.pushPose();
+
+            // World position of COM, relative to camera
+            stack.translate(interpolatedPos.x - camPos.x,
+                    interpolatedPos.y - camPos.y,
+                    interpolatedPos.z - camPos.z);
+
+            // Apply construct rotation
+            stack.mulPose(interpolatedRot);
+
+            VertexConsumer consumer = MC.renderBuffers().bufferSource().getBuffer(RenderType.lines());
+
+            // --- COM small yellow box, centered at r' = 0 => worldPos ---
+            double s = 0.25;
+            VoxelShape comShape = Shapes.create(-s, -s, -s, s, s, s);
+            renderShape(stack, consumer, comShape, 0.0, 0.0, 0.0, 1.0F, 1.0F, 0.0F, 1.0F);
+
+            // --- Full construct bounding box in local (r - com) space, white ---
+            VoxelShape boundsShape = Shapes.create(minX, minY, minZ, maxX, maxY, maxZ);
+            renderShape(stack, consumer, boundsShape, 0.0, 0.0, 0.0, 1.0F, 1.0F, 1.0F, 1.0F);
+
+            stack.popPose();
+
+            // OPTIONAL: also draw the pivot (worldPos) as a tiny blue cube with no rotation
+            // so you can clearly see what point the ship is rotating around.
+            stack.pushPose();
+            stack.translate(interpolatedPos.x - camPos.x,
+                    interpolatedPos.y - camPos.y,
+                    interpolatedPos.z - camPos.z);
+            VertexConsumer pivotConsumer = MC.renderBuffers().bufferSource().getBuffer(RenderType.lines());
+            double ps = 0.1;
+            VoxelShape pivotShape = Shapes.create(-ps, -ps, -ps, ps, ps, ps);
+            renderShape(stack, pivotConsumer, pivotShape, 0.0, 0.0, 0.0, 0.0F, 0.0F, 1.0F, 1.0F);
+            stack.popPose();
+        }
     }
 
     public HashMap<UUID, CachedConstruct> getRenderedConstructs() {

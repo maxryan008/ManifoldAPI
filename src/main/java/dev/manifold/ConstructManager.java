@@ -753,6 +753,24 @@ public class ConstructManager {
         );
     }
 
+    public Optional<BlockPos> getNegativeBounds(UUID id) {
+        DynamicConstruct construct = constructs.get(id);
+        if (construct == null) {
+            return Optional.empty();
+        } else {
+            return Optional.of(construct.getNegativeBounds());
+        }
+    }
+
+    public Optional<BlockPos> getPositiveBounds(UUID id) {
+        DynamicConstruct construct = constructs.get(id);
+        if (construct == null) {
+            return Optional.empty();
+        } else {
+            return Optional.of(construct.getPositiveBounds());
+        }
+    }
+
     /** Builds simple per-block local OBBs for all non-air blocks in [neg..pos] around simOrigin. */
     public static List<OBB> buildLocalObbsFromSimArea(
             ServerLevel sim,
