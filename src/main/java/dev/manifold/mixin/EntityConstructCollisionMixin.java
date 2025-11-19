@@ -30,6 +30,7 @@ public abstract class EntityConstructCollisionMixin {
         final Entity self = (Entity) (Object) this;
         final AABB startBB = this.getBoundingBox();
         final float stepHeight = Math.max(0.0f, this.maxUpStep());
-        return ConstructCollisionEngine.resolveCollisions(vanillaResolved, self, startBB, stepHeight);
+
+        return ConstructCollisionEngine.resolveMotion(self, startBB, vanillaResolved, stepHeight);
     }
 }
